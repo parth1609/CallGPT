@@ -437,5 +437,127 @@ Steps:
 4. Store the metadata in the database
 
  
+------------------------------------------------------------------
+Migrate from SqliteSaver to PostgresSaver(supabase)
+@web https://reference.langchain.com/python/langgraph/checkpoints/?_gl=1*1asz089*_gcl_au*Mzg4NzYyODIzLjE3NTc5Mzc3MTA.*_ga*MTkzMjc4OTEzOS4xNzU3OTM1ODI3*_ga_47WX3HKKY2*czE3NjI2Njc0NTgkbzUyJGcxJHQxNzYyNjY4MTM4JGo2MCRsMCRoMA..#langgraph.checkpoint.postgres.PostgresSaver
+1. Store the chat history in PostgreSQL database
+2. Use the PostgresSaver to store the chat history with langchain
 
+```python
+import os
+from dotenv import load_dotenv
+from psycopg_pool import ConnectionPool
+from langchain_postgres import PostgresSaver
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.runnables import RunnableConfig
 
+# Load environment variables from .env file
+load_dotenv()
+
+# Build the connection string from environment variables
+DB_USER = os.getenv("SUPABASE_DB_USER")
+DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD")
+DB_HOST = os.getenv("SUPABASE_DB_HOST")
+DB_PORT = os.getenv("SUPABASE_DB_PORT")
+DB_NAME = os.getenv("SUPABASE_DB_NAME")
+
+# Supabase connection string format
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+def setup_and_use_postgres_saver():
+    # 1. Create a connection pool (recommended for production)
+    # The PostgresSaver can accept a connection pool object directly.
+    pool = ConnectionPool(conninfo=DATABASE_URL, max_size=20)
+    
+    # 2. Instantiate the PostgresSaver
+    # Note: PostgresSaver is also known as PostgresCheckpoint
+    memory = PostgresSaver(sync_connection=pool)
+
+    # 3. Create the necessary tables in Supabase (only needs to be run once)
+    # The tables will be created if they do not exist.
+    print("Creating tables if they don't exist...")
+    with pool.getconn() as conn:
+        memory.create_tables(conn)
+    pool.putconn(conn) # Manually return the connection acquired via getconn() if not using 'with' on the connection itself
+
+    print("Tables created successfully.")
+
+    # 4. Define a specific 'thread_id' to manage a conversation
+    # This ID is essential for the saver to track the correct conversation history.
+    thread_id = "my_unique_conversation_thread"
+    config = RunnableConfig(configurable={"thread_id": thread_id})
+
+    # 5. Add messages to the conversation
+    print(f"Adding messages to thread ID: {thread_id}")
+    # The 'put' method automatically saves the state to the database
+    memory.put(
+        config,
+        {
+            "messages": [
+                HumanMessage(content="Hi there! I need help with my Supabase setup."),
+                AIMessage(content="Hello! I can assist you with that. What's the issue?"),
+            ]
+        },
+    )
+
+    # 6. Retrieve the conversation history
+    print(f"Retrieving conversation for thread ID: {thread_id}")
+    checkpoint = memory.get(config)
+    messages = checkpoint.get("messages", [])
+
+    print("\n--- Conversation History ---")
+    for msg in messages:
+        print(f"{type(msg).__name__}: {msg.content}")
+    print("----------------------------\n")
+
+    # 7. Close the connection pool when the application is done
+    pool.close()
+    print("Connection pool closed.")
+
+if __name__ == "__main__":
+    setup_and_use_postgres_saver()
+```
+
+for supabase URI connection msg pool
+```python
+import psycopg2
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env
+load_dotenv()
+
+# Fetch variables
+USER = os.getenv("user")
+PASSWORD = os.getenv("password")
+HOST = os.getenv("host")
+PORT = os.getenv("port")
+DBNAME = os.getenv("dbname")
+
+# Connect to the database
+try:
+    connection = psycopg2.connect(
+        user=USER,
+        password=PASSWORD,
+        host=HOST,
+        port=PORT,
+        dbname=DBNAME
+    )
+    print("Connection successful!")
+    
+    # Create a cursor to execute SQL queries
+    cursor = connection.cursor()
+    
+    # Example query
+    cursor.execute("SELECT NOW();")
+    result = cursor.fetchone()
+    print("Current Time:", result)
+
+    # Close the cursor and connection
+    cursor.close()
+    connection.close()
+    print("Connection closed.")
+
+except Exception as e:
+    print(f"Failed to connect: {e}")
+```
