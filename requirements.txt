@@ -17,3 +17,7 @@ sentence-transformers
 streamlit
 langgraph-checkpoint-sqlite
 supabase
+
+# system
+make
+flake8

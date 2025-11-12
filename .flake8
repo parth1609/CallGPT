@@ -1,0 +1,12 @@
+[flake8]
+
+# Exclude directories and files that are not relevant to code style checks.
+exclude = .git,__pycache__,.venv
+
+# Maximum line length (88 characters) to ensure readability.
+max-line-length = 88
+
+# Ignore E203 whitespace before ":" and W503 line break before binary operator.
+; E203: Whitespace before ':' (conflicts with Black formatter)
+; W503: Line break before binary operator (allowed by PEP 8)
+ignore = E203, W503
