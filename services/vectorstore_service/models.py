@@ -12,7 +12,7 @@ class UpsertRequest(BaseModel):
     """Request model for upserting vectors"""
     chunks: List[str] = Field(..., description="Text chunks")
     embeddings: List[List[float]] = Field(..., description="Embedding vectors")
-    index_name: str = Field(default="documents", description="Index name")
+    index_name: str = Field(default="supabase-bucket", description="Index name")
     metadata: Optional[List[Dict[str, Any]]] = Field(default=None, description="Metadata for each chunk")
 
 

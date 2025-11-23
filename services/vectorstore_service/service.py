@@ -70,7 +70,7 @@ class VectorStoreService:
         self,
         chunks: List[str],
         embeddings: List[List[float]],
-        index_name: str = "documents",
+        index_name: str = None,
         metadata: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
