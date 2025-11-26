@@ -298,3 +298,141 @@ class ConversationService:
         """Close connection pool"""
         if self.pool:
             self.pool.closeall()
+
+
+# ============================================================================
+# Pipeline Utilities (Backend-compatible functions for LangGraph integration)
+# ============================================================================
+
+def load_conversation(chatbot, thread_id: str) -> List:
+    """
+    Purpose: Load conversation history (messages) for a given thread from the graph's checkpointer.
+
+    Parameters:
+    - chatbot (Any): The compiled LangGraph application with checkpointer.
+    - thread_id (str): The thread ID to load.
+
+    Return Value:
+    - List[BaseMessage]: List of messages (HumanMessage, AIMessage) from the thread.
+
+    Side Effects:
+    - Reads from the checkpointer.
+
+    Examples:
+    # messages = load_conversation(chatbot, "thread-123")
+    """
+    try:
+        config = {"configurable": {"thread_id": thread_id}}
+        state = chatbot.get_state(config=config)
+        # Return messages if present, otherwise empty list
+        return list(state.values.get("messages", []))
+    except Exception:
+        # If thread doesn't exist or error, return empty
+        return []
+
+
+def convert_messages_to_chat_history(messages: List) -> List[Dict[str, str]]:
+    """
+    Purpose: Convert LangChain messages to a simple dict format for UI rendering.
+
+    Parameters:
+    - messages (List[BaseMessage]): List of LangChain message objects.
+
+    Return Value:
+    - List[Dict[str, str]]: List of dicts with 'role' and 'content' keys.
+
+    Side Effects:
+    - None.
+
+    Examples:
+    >>> from langchain_core.messages import HumanMessage, AIMessage
+    >>> msgs = [HumanMessage(content="Hi"), AIMessage(content="Hello")]
+    >>> converted = convert_messages_to_chat_history(msgs)
+    >>> converted[0]['role']
+    'user'
+    """
+    from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk
+    
+    chat_history = []
+    for msg in messages:
+        if isinstance(msg, AIMessageChunk):
+            continue
+        if isinstance(msg, HumanMessage):
+            role = "user"
+        elif isinstance(msg, AIMessage):
+            role = "assistant"
+        else:
+            role = "system"
+        chat_history.append({"role": role, "content": msg.content})
+    return chat_history
+
+
+def build_messages_state(
+    user_input: str,
+    base_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Purpose: Build a state dictionary that carries a 'messages' channel with the
+    current user input, optionally merging additional keys from an existing base state.
+
+    Parameters:
+    - user_input (str): The user's input for this turn.
+    - base_state (Optional[Dict[str, Any]]): Existing state to merge (e.g., index_dir,
+      model params). If provided, its keys are copied into the returned state.
+
+    Return Value:
+    - Dict[str, Any]: State including a 'messages' key suitable for `chatbot.stream`.
+
+    Side Effects:
+    - None.
+
+    Examples:
+    >>> s = build_messages_state("Hello")
+    >>> isinstance(s["messages"], list)
+    True
+    """
+    from langchain_core.messages import HumanMessage
+    
+    state: Dict[str, Any] = dict(base_state) if base_state else {}
+    state["messages"] = [HumanMessage(content=user_input)]
+    # Ensure compatibility with current pipeline nodes which expect 'question'
+    # for retrieval and prompt formatting.
+    state.setdefault("question", user_input)
+    return state
+
+
+def stream_ai_tokens(
+    chatbot,
+    state: Dict[str, Any],
+    thread_id: str,
+    stream_mode: str = "messages",
+):
+    """
+    Purpose: Stream only assistant (AI) message chunks' content.
+
+    Parameters:
+    - chatbot (Any): Compiled LangGraph app.
+    - state (Dict[str, Any]): Initial state for the graph.
+    - thread_id (str): Thread identifier used by the LangGraph checkpointer.
+    - stream_mode (str): Streaming mode; default 'messages'.
+
+    Return Value:
+    - Generator[str, None, None]: Yields strings representing AI message content chunks.
+
+    Side Effects:
+    - None directly; depends on graph execution.
+
+    Examples:
+    >>> # def ai_only():
+    >>> #     yield from stream_ai_tokens(chatbot, state, thread_id)
+    >>> # text = st.write_stream(ai_only())
+    """
+    from langchain_core.messages import AIMessage, AIMessageChunk
+    
+    config = {"configurable": {"thread_id": thread_id}}
+    for message_chunk, _metadata in chatbot.stream(
+        state, config=config, stream_mode=stream_mode
+    ):
+        if isinstance(message_chunk, (AIMessage, AIMessageChunk)):
+            # Yield only assistant tokens or message fragments
+            yield message_chunk.content

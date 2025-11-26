@@ -238,3 +238,77 @@ class DocumentService:
         except Exception as e:
             print(f"Document deletion error: {e}")
             return False
+
+
+# ============================================================================
+# Pipeline Utilities (Backend-compatible functions for LangGraph integration)
+# ============================================================================
+
+def chunk_documents(
+    docs: List,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+    separators: List[str] = None,
+):
+    """
+    Purpose: Split input Documents into smaller chunks for downstream embedding and retrieval.
+    
+    This utility function chunks documents using RecursiveCharacterTextSplitter,
+    following the backend pattern for pipeline usage.
+
+    Parameters:
+    - docs (List[Document]): Input documents to split.
+    - chunk_size (int): Max characters per chunk.
+    - chunk_overlap (int): Overlap in characters between consecutive chunks.
+    - separators (Optional[List[str]]): Custom separators to guide splitting. Defaults to sensible values.
+
+    Return Value:
+    - List[Document]: Chunked documents with metadata preserved.
+
+    Side Effects:
+    - None.
+
+    Examples:
+    >>> from langchain_core.documents import Document
+    >>> chunks = chunk_documents([Document(page_content="a" * 3000)])
+    >>> len(chunks) >= 2
+    True
+    """
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    from langchain_core.documents import Document
+    
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=separators,
+    )
+    return splitter.split_documents(docs)
+
+
+def load_text_file(path: str) -> List:
+    """
+    Purpose: Load a text file and return as a list of Documents.
+    
+    This utility function loads text content from a file and wraps it in a
+    LangChain Document object for pipeline processing.
+
+    Parameters:
+    - path (str): Path to text file.
+
+    Return Value:
+    - List[Document]: List containing a single Document with the file contents.
+
+    Side Effects:
+    - Reads file from disk.
+
+    Examples:
+    >>> # docs = load_text_file("input.txt")
+    >>> # len(docs) == 1
+    True
+    """
+    from langchain_core.documents import Document
+    
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    return [Document(page_content=content, metadata={"source": path})]

@@ -99,3 +99,32 @@ class HealthCheckResponse(BaseModel):
     status: str = Field(..., description="Service status")
     service: str = Field(default="document_service", description="Service name")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Current timestamp")
+
+
+# Utility function models
+
+class ChunkDocumentsRequest(BaseModel):
+    """
+    Request model for chunking documents utility.
+    
+    Parameters:
+    - content (str): Text content to chunk
+    - chunk_size (int): Maximum size of each chunk
+    - chunk_overlap (int): Overlap between chunks
+    """
+    content: str = Field(..., description="Text content to chunk")
+    chunk_size: int = Field(default=1000, description="Maximum chunk size in characters")
+    chunk_overlap: int = Field(default=200, description="Overlap between chunks")
+
+
+class ChunkDocumentsResponse(BaseModel):
+    """
+    Response model for chunking operation.
+    
+    Parameters:
+    - chunks (list[str]): List of text chunks
+    - total_chunks (int): Number of chunks created
+    """
+    chunks: list[str] = Field(..., description="List of text chunks")
+    total_chunks: int = Field(..., description="Total number of chunks")
+

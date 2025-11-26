@@ -1,18 +1,14 @@
 """
-Purpose: FastAPI application for LLM Service.
-
-Usage:
-    uvicorn main:app --host 0.0.0.0 --port 8005 --reload
+Purpose: FastAPI router for LLM Module.
 """
 
-from fastapi import FastAPI, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from datetime import datetime
 import os
 import json
 
-from models import (
+from .models import (
     ChatRequest,
     ChatResponse,
     Message,
@@ -21,33 +17,21 @@ from models import (
     ModelInfo,
     HealthCheckResponse,
 )
-from service import LLMService
+from .service import LLMService
 
 
-app = FastAPI(
-    title="LLM Service",
-    description="Microservice for chat completion with various LLM providers",
-    version="1.0.0",
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+router = APIRouter(tags=["LLM"])
 
 llm_service = LLMService()
 
 
-@app.get("/health", response_model=HealthCheckResponse)
+@router.get("/health", response_model=HealthCheckResponse)
 async def health_check():
     """Health check endpoint"""
     return HealthCheckResponse(status="healthy", timestamp=datetime.utcnow())
 
 
-@app.post("/api/v1/llm/chat", response_model=ChatResponse)
+@router.post("/api/v1/llm/chat", response_model=ChatResponse)
 async def chat_completion(request: ChatRequest):
     """Generate chat completion"""
     try:
@@ -72,7 +56,7 @@ async def chat_completion(request: ChatRequest):
         )
 
 
-@app.post("/api/v1/llm/stream")
+@router.post("/api/v1/llm/stream")
 async def stream_chat_completion(request: ChatRequest):
     """Stream chat completion"""
     try:
@@ -98,16 +82,10 @@ async def stream_chat_completion(request: ChatRequest):
         )
 
 
-@app.get("/api/v1/llm/models", response_model=ModelsListResponse)
+@router.get("/api/v1/llm/models", response_model=ModelsListResponse)
 async def list_models():
     """Get list of available models"""
     models = llm_service.get_available_models()
     return ModelsListResponse(
         models=[ModelInfo(**m) for m in models]
     )
-
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("SERVICE_PORT", 8005))
-    uvicorn.run(app, host="0.0.0.0", port=port)

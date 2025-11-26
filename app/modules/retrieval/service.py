@@ -1,13 +1,14 @@
 """
-Purpose: Business logic for Retrieval Service.
+Purpose: Business logic for Retrieval Module.
 Handles semantic search and document retrieval using Pinecone with LangChain.
 """
 
 import os
-import httpx
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from pinecone import Pinecone
+
+from app.modules.embedding.service import EmbeddingService
 
 
 load_dotenv()
@@ -18,16 +19,12 @@ class RetrievalService:
     
     def __init__(
         self,
-        embedding_url: Optional[str] = None,
         pinecone_api_key: Optional[str] = None,
         index_name: Optional[str] = None,
     ):
         """Initialize Retrieval Service"""
-        self.embedding_url = embedding_url or os.getenv(
-            "EMBEDDING_SERVICE_URL",
-            "http://embedding_service:8002"
-        )
-        self.http_client = httpx.AsyncClient(timeout=30.0)
+        # Initialize Embedding Service directly
+        self.embedding_service = EmbeddingService()
         
         # Initialize Pinecone
         self.pinecone_api_key = pinecone_api_key or os.getenv("PINECONE_API_KEY")
@@ -40,23 +37,23 @@ class RetrievalService:
         self.pc = Pinecone(api_key=self.pinecone_api_key)
         
         # Initialize Pinecone index (will be used with LangChain)
+        print(f"DEBUG: RetrievalService init. Index: {self.index_name}, API Key: {self.pinecone_api_key[:4]}...")
         self.index = self.pc.Index(self.index_name)
     
-    async def _get_query_embedding(
+    def _get_query_embedding(
         self,
         query: str,
         model_name: Optional[str] = None,
     ) -> List[float]:
         """Get embedding for query text"""
-        response = await self.http_client.post(
-            f"{self.embedding_url}/api/v1/embeddings/generate",
-            json={"texts": [query], "model_name": model_name},
+        # Direct call to embedding service
+        embeddings, _, _ = self.embedding_service.generate_embeddings(
+            texts=[query],
+            model_name=model_name
         )
-        response.raise_for_status()
-        data = response.json()
-        return data["embeddings"][0]
+        return embeddings[0]
     
-    async def similarity_search(
+    def similarity_search(
         self,
         query: str,
         table_name: str = None,
@@ -80,7 +77,7 @@ class RetrievalService:
         - List of search results with content, similarity, and metadata
         """
         # Get query embedding from embedding service
-        query_embedding = await self._get_query_embedding(query, embedding_model)
+        query_embedding = self._get_query_embedding(query, embedding_model)
         
         # Perform similarity search using Pinecone
         # Use query_by_vector for direct embedding search
@@ -112,7 +109,7 @@ class RetrievalService:
         except Exception as e:
             raise Exception(f"Pinecone similarity search failed: {str(e)}")
     
-    async def mmr_search(
+    def mmr_search(
         self,
         query: str,
         table_name: str = None,
@@ -142,7 +139,7 @@ class RetrievalService:
         - List of diverse, relevant results
         """
         # Get query embedding
-        query_embedding = await self._get_query_embedding(query, embedding_model)
+        query_embedding = self._get_query_embedding(query, embedding_model)
         
         # Fetch more candidates than needed for MMR
         try:
@@ -222,7 +219,48 @@ class RetrievalService:
         if magnitude1 == 0 or magnitude2 == 0:
             return 0.0
         return dot_product / (magnitude1 * magnitude2)
-    
-    async def close(self):
-        """Close HTTP client"""
-        await self.http_client.aclose()
+
+
+# ============================================================================
+# Pipeline Utilities (Backend-compatible functions for LangGraph integration)
+# ============================================================================
+
+def get_retriever(vstore, search_type: str = "mmr", **search_kwargs):
+    """
+    Purpose: Create a retriever from a vector store.
+
+    Parameters:
+    - vstore: The vector store instance (must have as_retriever method).
+    - search_type (str): One of {"mmr", "similarity"}.
+    - **search_kwargs: Additional search parameters passed to `as_retriever`.
+
+    Return Value:
+    - Any: A LangChain retriever object.
+
+    Side Effects:
+    - None.
+
+    Examples:
+    # retr = get_retriever(vstore, search_type="similarity", k=4)  
+    """
+    return vstore.as_retriever(search_type=search_type, search_kwargs=search_kwargs)
+
+
+def retrieve(retriever, query: str) -> List:
+    """
+    Purpose: Retrieve relevant documents for the given query.
+
+    Parameters:
+    - retriever (Any): Retriever created via `get_retriever`.
+    - query (str): Natural language question/query.
+
+    Return Value:
+    - List[Document]: Retrieved documents.
+
+    Side Effects:
+    - None.
+
+    Examples:
+    # docs = retrieve(retriever, "What is RAG?")  
+    """
+    return retriever.invoke(query)

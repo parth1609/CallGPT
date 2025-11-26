@@ -181,3 +181,38 @@ class EmbeddingService:
             }
             for name, info in self.AVAILABLE_MODELS.items()
         ]
+
+
+# ============================================================================
+# Pipeline Utilities (Backend-compatible functions for LangGraph integration)
+# ============================================================================
+
+def get_embedding_model(model_name: str = None):
+    """
+    Purpose: Return a LangChain Embeddings instance for the specified model.
+    
+    This utility function creates an embeddings model instance that can be used
+    directly in the RAG pipeline, following the backend pattern.
+
+    Parameters: 
+    - model_name (str): Model name. If None, uses default.
+
+    Return Value:
+    - Embeddings: A LangChain-compatible embeddings object.
+
+    Side Effects:
+    - Downloads model on first use.
+
+    Examples:
+    >>> emb = get_embedding_model()
+    >>> isinstance(emb, object)
+    True
+    """
+    if model_name is None:
+        model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    
+    return HuggingFaceEmbeddings(
+        model_name=model_name,
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True},
+    )

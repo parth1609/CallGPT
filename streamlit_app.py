@@ -1,6 +1,7 @@
 import os
 import hashlib
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
+import uuid
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -8,11 +9,13 @@ import sqlite3
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
-import backend.app as backend_app
-from langchain_core.messages import HumanMessage, AIMessage
-from backend.storage import supabase_storage as sstore
-
+# Import from new modular structure
+from app import pipeline as app_pipeline
+from app.modules.document.service import DocumentService
+from app.modules.embedding.service import EmbeddingService
+from app.modules.vectorstore.service import VectorStoreService
 
 load_dotenv(override=False)
 
@@ -45,8 +48,13 @@ st.title("💬 CallGPT")
 
 ##################### Utilities #####################
 
+# Initialize services
+doc_service = DocumentService()
+embedding_service = EmbeddingService()
+vectorstore_service = VectorStoreService()
+
 def generate_thread_id():
-    return backend_app.conversation.generate_thread_id()
+    return uuid.uuid4().hex
 
 def add_thread(thread_id: str) -> None:
     if "chat_threads" not in st.session_state:
@@ -66,6 +74,7 @@ def retrieve_all_threads():
     if not cp:
         return list(all_threads)
     try:
+        # SqliteSaver.list returns an iterator of CheckpointTuple
         for checkpoint in cp.list(None):
             tid = checkpoint.config.get('configurable', {}).get('thread_id')
             if tid:
@@ -74,18 +83,71 @@ def retrieve_all_threads():
         pass
     return list(all_threads)
 
-def load_conversation_ui(thread_id: str):
-    if not st.session_state.get("chatbot"):
-        return []
-    return backend_app.conversation.load_conversation(st.session_state["chatbot"], thread_id)
+def load_conversation(graph, thread_id: str) -> List[BaseMessage]:
+    """Load conversation history from the graph state."""
+    try:
+        config = {"configurable": {"thread_id": thread_id}}
+        state = graph.get_state(config)
+        if state and state.values:
+            return state.values.get("messages", [])
+    except Exception:
+        pass
+    return []
+
+def convert_messages_to_chat_history(messages: List[BaseMessage]) -> List[Dict[str, Any]]:
+    """Convert LangChain messages to Streamlit chat history format."""
+    history = []
+    for m in messages:
+        role = "user" if isinstance(m, HumanMessage) else "assistant"
+        history.append({"role": role, "content": m.content})
+    return history
+
+def get_thread_preview(graph, thread_id: str, max_length: int = 50) -> str:
+    """Get a preview of the thread (first user message)."""
+    messages = load_conversation(graph, thread_id)
+    for m in messages:
+        if isinstance(m, HumanMessage):
+            content = m.content
+            return content[:max_length] + ("..." if len(content) > max_length else "")
+    return "New conversation"
+
+def reset_chat(current_threads, current_histories):
+    """Create a new chat thread."""
+    new_tid = generate_thread_id()
+    if new_tid not in current_threads:
+        current_threads.append(new_tid)
+    if new_tid not in current_histories:
+        current_histories[new_tid] = []
+    return new_tid, current_threads, current_histories
 
 def docs_from_upload(uploaded_file) -> List[Document]:
     content = uploaded_file.getvalue().decode("utf-8", errors="ignore")
     return [Document(page_content=content, metadata={"source": uploaded_file.name})]
 
+def stream_ai_tokens(graph, state, thread_id):
+    """Stream AI tokens from the graph."""
+    config = {"configurable": {"thread_id": thread_id}}
+    
+    # Use stream_mode="updates" to get node outputs as they happen
+    for event in graph.stream(state, config=config, stream_mode="updates"):
+        # event is a dict {node_name: output}
+        # Our node_answer yields chunks like {"messages": [AIMessageChunk(...)]}
+        # But wait, node_answer is a generator.
+        # When a node is a generator, graph.stream yields the values yielded by the node.
+        
+        # Check if event comes from 'answer' node
+        if "answer" in event:
+            chunk_data = event["answer"]
+            # Check if it has messages
+            if "messages" in chunk_data:
+                for msg in chunk_data["messages"]:
+                    if isinstance(msg, (AIMessage, type(None))) and hasattr(msg, 'content'): # AIMessageChunk inherits AIMessage
+                         # In newer LangGraph, it might be AIMessageChunk
+                         yield msg.content
+                    elif hasattr(msg, 'content'):
+                        yield msg.content
 
- 
-
+##################### Session State #####################
 
 if "vstore" not in st.session_state:
     st.session_state.vstore = None
@@ -113,7 +175,7 @@ if "thread_id" not in st.session_state:
         st.session_state["thread_id"] = st.session_state["chat_threads"][0]
     else:
         # No persisted threads: create a fresh one and add it to the list
-        st.session_state["thread_id"] = backend_app.conversation.generate_thread_id()
+        st.session_state["thread_id"] = generate_thread_id()
         st.session_state["chat_threads"].append(st.session_state["thread_id"])
 if "chat_histories" not in st.session_state:
     st.session_state.chat_histories = {st.session_state.thread_id: []}
@@ -121,15 +183,15 @@ if "chat_histories" not in st.session_state:
 # Ensure chatbot is available to read persisted messages on first load
 if "chatbot" not in st.session_state or st.session_state["chatbot"] is None:
     try:
-        st.session_state["chatbot"] = backend_app.build_rag_graph(checkpointer=st.session_state.checkpointer)
+        st.session_state["chatbot"] = app_pipeline.build_rag_graph(checkpointer=st.session_state.checkpointer)
     except Exception:
         st.session_state["chatbot"] = None
 
 # Hydrate the active thread's history from the checkpointer so messages appear after refresh
 try:
     if st.session_state.get("chatbot"):
-        _msgs = backend_app.conversation.load_conversation(st.session_state["chatbot"], st.session_state["thread_id"])
-        _hist = backend_app.conversation.convert_messages_to_chat_history(_msgs)
+        _msgs = load_conversation(st.session_state["chatbot"], st.session_state["thread_id"])
+        _hist = convert_messages_to_chat_history(_msgs)
         st.session_state.chat_histories[st.session_state["thread_id"]] = _hist
 except Exception:
     pass
@@ -138,7 +200,7 @@ except Exception:
 st.sidebar.title("💬 CallGPT")
 
 if st.sidebar.button("➕ New Chat", use_container_width=True, type="primary"):
-    new_tid, new_threads, new_histories = backend_app.conversation.reset_chat(
+    new_tid, new_threads, new_histories = reset_chat(
         st.session_state.chat_threads,
         st.session_state.chat_histories,
     )
@@ -154,7 +216,7 @@ st.sidebar.subheader("📚 My Conversations")
 for thread_id in st.session_state.chat_threads[::-1]:
     # Get preview for thread
     if st.session_state.get("chatbot"):
-        preview = backend_app.conversation.get_thread_preview(st.session_state.chatbot, thread_id, max_length=35)
+        preview = get_thread_preview(st.session_state.chatbot, thread_id, max_length=35)
     else:
         # Fallback if chatbot not ready
         preview = f"Thread {thread_id[:8]}..."
@@ -175,8 +237,8 @@ for thread_id in st.session_state.chat_threads[::-1]:
             
             # Load conversation from checkpointer if chatbot is ready
             if st.session_state.get("chatbot"):
-                messages = backend_app.conversation.load_conversation(st.session_state.chatbot, thread_id)
-                chat_history = backend_app.conversation.convert_messages_to_chat_history(messages)
+                messages = load_conversation(st.session_state.chatbot, thread_id)
+                chat_history = convert_messages_to_chat_history(messages)
                 st.session_state.chat_histories[thread_id] = chat_history
             
             st.rerun()
@@ -207,8 +269,6 @@ with st.sidebar.expander("⚙️ Settings", expanded=False):
 # File uploader
 uploaded = st.file_uploader("Upload a .txt file", type=["txt"]) 
 
-
-
 col1, col2 = st.columns([2, 1])
 with col1:
     if uploaded is not None:
@@ -219,49 +279,45 @@ with col1:
         if st.button("Build / Update Index", type="primary"):
             try:
                 docs = docs_from_upload(uploaded)
-                chunks = backend_app.chunking.chunk_documents(docs)
-                emb_model_obj = backend_app.embeddings.get_embedding_model(emb_model or None)
-
-                # Supabase: Upsert documents + embeddings into pgvector
-                backend_app.vectorstore_supabase.build_supabase_from_documents(
-                    chunks,
-                    emb_model_obj,
-                    table_name=st.session_state.table_name,
-                    query_name=st.session_state.query_name,
+                
+                # Chunking using EmbeddingService
+                chunks = []
+                for doc in docs:
+                    text_chunks = embedding_service.chunk_text(doc.page_content)
+                    chunks.extend(text_chunks)
+                
+                # Generate embeddings
+                embeddings, _, _ = embedding_service.generate_embeddings(chunks, model_name=emb_model)
+                
+                # Upsert to VectorStore (Supabase)
+                # Note: VectorStoreService expects chunks as strings, embeddings as list of lists
+                vectorstore_service.upsert_vectors(
+                    chunks=chunks,
+                    embeddings=embeddings,
+                    index_name=st.session_state.table_name,
+                    metadata=[{"source": uploaded.name} for _ in chunks]
                 )
+                
                 st.session_state.vstore = f"supabase:{st.session_state.table_name}"
-
                 st.session_state.embeddings_model = emb_model or None
                 st.session_state.llm_model = llm_model or None
 
                 st.success("Index is ready.")
-                # Persist the uploaded content to a stable path for graph-based chat
+                
+                # Persist the uploaded content to Supabase Storage using DocumentService
                 try:
                     file_bytes = uploaded.getvalue()
                     content_full = file_bytes.decode("utf-8", errors="ignore")
-                    h = hashlib.sha1(file_bytes).hexdigest()[:12]
-                    # Supabase Storage: ensure bucket, upload file (use provided filename), fetch/store metadata
-                    # Bucket name from environment variable (SUPABASE_BUCKET) or defaults to 'user-files'
-                    bucket_name = sstore.get_bucket_name()
-                    sstore.ensure_bucket_exists(bucket_name, public=True)
-                    obj_name = uploaded.name 
-                    upload_res = sstore.upload_text_bytes(
-                        bucket_name=bucket_name,
-                        object_name=obj_name,
-                        data=file_bytes,
-                        upsert=True,
-                    )
-                    meta = sstore.get_file_metadata(bucket_name=bucket_name, object_name=obj_name)
-                    sstore.store_metadata_record(
-                        bucket_name=bucket_name,
-                        object_name=obj_name,
-                        meta=meta,
-                        public_url=upload_res.get("public_url") if isinstance(upload_res, dict) else None,
+                    
+                    # Upload document
+                    doc_service.upload_document(
+                        filename=uploaded.name,
+                        content=content_full,
+                        metadata={"content_type": "text/plain"}
                     )
 
-                    # Local file persistence removed: files are stored in Supabase Storage
                     # Prepare LangGraph chatbot for chat mode
-                    st.session_state.chatbot = backend_app.build_rag_graph(checkpointer=st.session_state.checkpointer)
+                    st.session_state.chatbot = app_pipeline.build_rag_graph(checkpointer=st.session_state.checkpointer)
                 except Exception as persist_e:
                     st.info(f"Saved upload for chat failed (chat still usable without graph): {persist_e}")
             except Exception as e:
@@ -310,13 +366,20 @@ if user_input:
                 "k": k,
                 "fetch_k": fetch_k,
                 "lambda_mult": lambda_mult,
+                "question": user_input, # Add question to state
             }
             if "chatbot" not in st.session_state or st.session_state["chatbot"] is None:
-                st.session_state["chatbot"] = backend_app.build_rag_graph(checkpointer=st.session_state.checkpointer)
-            state = backend_app.streaming.build_messages_state(user_input, base_state=base_state)
+                st.session_state["chatbot"] = app_pipeline.build_rag_graph(checkpointer=st.session_state.checkpointer)
+            
+            # Build state with messages
+            state = base_state.copy()
+            # We don't need to manually build messages list if we use checkpointer, 
+            # but we need to pass the new user message.
+            # The graph expects 'messages' in state.
+            state["messages"] = [HumanMessage(content=user_input)]
 
             def ai_only_stream():
-                yield from backend_app.streaming.stream_ai_tokens(
+                yield from stream_ai_tokens(
                     st.session_state["chatbot"],
                     state,
                     st.session_state["thread_id"],

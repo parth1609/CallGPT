@@ -1,47 +1,32 @@
 """
-Purpose: FastAPI application for Document Service.
+Purpose: FastAPI router for Document Module.
 Handles document uploads, storage, and retrieval operations.
-
-Usage:
-    uvicorn main:app --host 0.0.0.0 --port 8001 --reload
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, status
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, HTTPException, UploadFile, File, status
 from datetime import datetime
 import os
 
-from models import (
+from .models import (
     DocumentUploadRequest,
     DocumentUploadResponse,
     DocumentMetadataResponse,
     DocumentListResponse,
     DocumentContentResponse,
     HealthCheckResponse,
+    ChunkDocumentsRequest,
+    ChunkDocumentsResponse,
 )
-from service import DocumentService
+from .service import DocumentService
 
 
-app = FastAPI(
-    title="Document Service",
-    description="Microservice for document storage and retrieval",
-    version="1.0.0",
-)
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+router = APIRouter(tags=["Documents"])
 
 # Initialize service
 doc_service = DocumentService()
 
 
-@app.get("/health", response_model=HealthCheckResponse)
+@router.get("/health", response_model=HealthCheckResponse)
 async def health_check():
     """
     Health check endpoint to verify service availability.
@@ -51,12 +36,12 @@ async def health_check():
     """
     return HealthCheckResponse(
         status="healthy",
-        service="document_service",
+        service="document_module",
         timestamp=datetime.utcnow(),
     )
 
 
-@app.post("/api/v1/documents/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/api/v1/documents/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_document(request: DocumentUploadRequest):
     """
     Upload a document to storage.
@@ -85,7 +70,7 @@ async def upload_document(request: DocumentUploadRequest):
         )
 
 
-@app.post("/api/v1/documents/upload-file", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/api/v1/documents/upload-file", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_file(file: UploadFile = File(...)):
     """
     Upload a file directly (multipart/form-data).
@@ -117,7 +102,7 @@ async def upload_file(file: UploadFile = File(...)):
         )
 
 
-@app.get("/api/v1/documents/{document_id}", response_model=DocumentContentResponse)
+@router.get("/api/v1/documents/{document_id}", response_model=DocumentContentResponse)
 async def get_document(document_id: str):
     """
     Retrieve document content by ID.
@@ -147,7 +132,7 @@ async def get_document(document_id: str):
     )
 
 
-@app.get("/api/v1/documents/{document_id}/metadata", response_model=DocumentMetadataResponse)
+@router.get("/api/v1/documents/{document_id}/metadata", response_model=DocumentMetadataResponse)
 async def get_document_metadata(document_id: str):
     """
     Retrieve document metadata by ID.
@@ -169,7 +154,7 @@ async def get_document_metadata(document_id: str):
     return DocumentMetadataResponse(**metadata)
 
 
-@app.get("/api/v1/documents/", response_model=DocumentListResponse)
+@router.get("/api/v1/documents/", response_model=DocumentListResponse)
 async def list_documents(limit: int = 100, offset: int = 0):
     """
     List all documents with pagination.
@@ -189,7 +174,7 @@ async def list_documents(limit: int = 100, offset: int = 0):
     )
 
 
-@app.delete("/api/v1/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/api/v1/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(document_id: str):
     """
     Delete a document by ID.
@@ -210,7 +195,48 @@ async def delete_document(document_id: str):
         )
 
 
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("SERVICE_PORT", 8001))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+# ============================================================================
+# Utility Endpoints (Backend-compatible functions exposed as API)
+# ============================================================================
+
+@router.post("/api/v1/documents/utils/chunk", response_model=ChunkDocumentsResponse)
+async def chunk_document_text(request: ChunkDocumentsRequest):
+    """
+    Chunk text into smaller segments using the pipeline utility function.
+    
+    This endpoint exposes the chunk_documents() utility function for testing
+    and frontend access before using in the pipeline.
+    
+    Parameters:
+    - request (ChunkDocumentsRequest): Text and chunking parameters
+    
+    Return Value:
+    - ChunkDocumentsResponse: List of chunks
+    """
+    from .service import chunk_documents
+    from langchain_core.documents import Document
+    
+    try:
+        # Create a temporary document object
+        doc = Document(page_content=request.content, metadata={})
+        
+        # Use the utility function
+        chunks = chunk_documents(
+            docs=[doc],
+            chunk_size=request.chunk_size,
+            chunk_overlap=request.chunk_overlap,
+        )
+        
+        # Extract text from chunked documents
+        chunk_texts = [chunk.page_content for chunk in chunks]
+        
+        return ChunkDocumentsResponse(
+            chunks=chunk_texts,
+            total_chunks=len(chunk_texts),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Chunking failed: {str(e)}",
+        )
+

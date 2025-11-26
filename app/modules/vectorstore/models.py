@@ -60,3 +60,21 @@ class HealthCheckResponse(BaseModel):
     status: str
     service: str = "vectorstore_service"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+# Utility function models for Supabase operations
+
+class BuildSupabaseRequest(BaseModel):
+    """Request model for building Supabase vector store"""
+    chunks: List[str] = Field(..., description="Text chunks to store")
+    table_name: str = Field(default="documents", description="Supabase table name")
+    query_name: str = Field(default="match_documents", description="RPC function name")
+    embedding_model: Optional[str] = Field(default=None, description="Embedding model name")
+
+
+class BuildSupabaseResponse(BaseModel):
+    """Response model for Supabase build operation"""
+    success: bool
+    table_name: str
+    chunks_inserted: int
+

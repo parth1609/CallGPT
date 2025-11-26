@@ -1,23 +1,28 @@
-assemblyai==0.44.3
-langchain-community
-langchain-groq
-langgraph
-langchain-huggingface
-vapi-server-sdk
+httpx
+python-multipart
+psycopg2-binary
+make
 
-# RAG Application Dependencies (Simplified)
-langchain>=0.1.0
-langchain-text-splitters
-scikit-learn
-numpy
-pandas
-tqdm
-python-dotenv    
+#python libraries
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv
 sentence-transformers
+torch
 streamlit
-langgraph-checkpoint-sqlite
+
+#providers
+groq
+pinecone
 supabase
 
-# system
-make
-flake8
+#langchain dependencies
+langchain
+langchain-huggingface
+langchain-pinecone
+langchain-core
+langgraph
+langgraph-checkpoint-sqlite
+langchain-community

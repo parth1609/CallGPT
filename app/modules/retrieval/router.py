@@ -1,55 +1,33 @@
 """
-Purpose: FastAPI application for Retrieval Service.
-
-Usage:
-    uvicorn main:app --host 0.0.0.0 --port 8004 --reload
+Purpose: FastAPI router for Retrieval Module.
 """
 
-from fastapi import FastAPI, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, HTTPException, status
 from datetime import datetime
 import os
 
-from models import (
+from .models import (
     SearchRequest,
     MMRSearchRequest,
     SearchResult,
     SearchResponse,
     HealthCheckResponse,
 )
-from service import RetrievalService
+from .service import RetrievalService
 
 
-app = FastAPI(
-    title="Retrieval Service",
-    description="Microservice for semantic search and document retrieval using Pinecone with LangChain",
-    version="1.0.0",
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+router = APIRouter(tags=["Retrieval"])
 
 retrieval_service = RetrievalService()
 
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    await retrieval_service.close()
-
-
-@app.get("/health", response_model=HealthCheckResponse)
+@router.get("/health", response_model=HealthCheckResponse)
 async def health_check():
     """Health check endpoint"""
     return HealthCheckResponse(status="healthy", timestamp=datetime.utcnow())
 
 
-@app.post("/api/v1/retrieval/search", response_model=SearchResponse)
+@router.post("/api/v1/retrieval/search", response_model=SearchResponse)
 async def similarity_search(request: SearchRequest):
     """Perform similarity search"""
     try:
@@ -81,7 +59,7 @@ async def similarity_search(request: SearchRequest):
         )
 
 
-@app.post("/api/v1/retrieval/mmr-search", response_model=SearchResponse)
+@router.post("/api/v1/retrieval/mmr-search", response_model=SearchResponse)
 async def mmr_search(request: MMRSearchRequest):
     """Perform MMR search for diverse results"""
     try:
@@ -113,9 +91,3 @@ async def mmr_search(request: MMRSearchRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"MMR search failed: {str(e)}",
         )
-
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("SERVICE_PORT", 8004))
-    uvicorn.run(app, host="0.0.0.0", port=port)

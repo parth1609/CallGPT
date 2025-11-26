@@ -1,17 +1,13 @@
 """
-Purpose: FastAPI application for Embedding Service.
+Purpose: FastAPI router for Embedding Module.
 Handles text chunking and embedding generation.
-
-Usage:
-    uvicorn main:app --host 0.0.0.0 --port 8002 --reload
 """
 
-from fastapi import FastAPI, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, HTTPException, status
 from datetime import datetime
 import os
 
-from models import (
+from .models import (
     ChunkRequest,
     ChunkResponse,
     EmbeddingRequest,
@@ -22,29 +18,16 @@ from models import (
     ModelInfo,
     HealthCheckResponse,
 )
-from service import EmbeddingService
+from .service import EmbeddingService
 
 
-app = FastAPI(
-    title="Embedding Service",
-    description="Microservice for text chunking and embedding generation",
-    version="1.0.0",
-)
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+router = APIRouter(tags=["Embeddings"])
 
 # Initialize service
 embedding_service = EmbeddingService()
 
 
-@app.get("/health", response_model=HealthCheckResponse)
+@router.get("/health", response_model=HealthCheckResponse)
 async def health_check():
     """
     Health check endpoint to verify service availability.
@@ -54,12 +37,12 @@ async def health_check():
     """
     return HealthCheckResponse(
         status="healthy",
-        service="embedding_service",
+        service="embedding_module",
         timestamp=datetime.utcnow(),
     )
 
 
-@app.post("/api/v1/embeddings/chunk", response_model=ChunkResponse)
+@router.post("/api/v1/embeddings/chunk", response_model=ChunkResponse)
 async def chunk_text(request: ChunkRequest):
     """
     Chunk text into smaller segments.
@@ -88,7 +71,7 @@ async def chunk_text(request: ChunkRequest):
         )
 
 
-@app.post("/api/v1/embeddings/generate", response_model=EmbeddingResponse)
+@router.post("/api/v1/embeddings/generate", response_model=EmbeddingResponse)
 async def generate_embeddings(request: EmbeddingRequest):
     """
     Generate embeddings for a list of texts.
@@ -117,7 +100,7 @@ async def generate_embeddings(request: EmbeddingRequest):
         )
 
 
-@app.post("/api/v1/embeddings/chunk-and-embed", response_model=ChunkAndEmbedResponse)
+@router.post("/api/v1/embeddings/chunk-and-embed", response_model=ChunkAndEmbedResponse)
 async def chunk_and_embed(request: ChunkAndEmbedRequest):
     """
     Chunk text and generate embeddings in one operation.
@@ -152,7 +135,7 @@ async def chunk_and_embed(request: ChunkAndEmbedRequest):
         )
 
 
-@app.get("/api/v1/embeddings/models", response_model=ModelsListResponse)
+@router.get("/api/v1/embeddings/models", response_model=ModelsListResponse)
 async def list_models():
     """
     Get list of available embedding models.
@@ -165,9 +148,3 @@ async def list_models():
     return ModelsListResponse(
         models=[ModelInfo(**model) for model in models]
     )
-
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("SERVICE_PORT", 8002))
-    uvicorn.run(app, host="0.0.0.0", port=port)
