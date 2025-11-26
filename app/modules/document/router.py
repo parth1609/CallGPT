@@ -70,7 +70,11 @@ async def upload_document(request: DocumentUploadRequest):
         )
 
 
-@router.post("/api/v1/documents/upload-file", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/api/v1/documents/upload-file",
+    response_model=DocumentUploadResponse,
+    status_code=status.HTTP_201_CREATED
+)
 async def upload_file(file: UploadFile = File(...)):
     """
     Upload a file directly (multipart/form-data).
@@ -95,6 +99,7 @@ async def upload_file(file: UploadFile = File(...)):
             metadata={"original_filename": file.filename, "content_type": file.content_type},
         )
         return DocumentUploadResponse(**result)
+        # return Document(page_content=text_content,metadata=result['metadata'])
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

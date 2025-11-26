@@ -1,4 +1,5 @@
 from __future__ import annotations
+from fileinput import filename
 from typing import Any, Dict, List, Optional, TypedDict
 from typing import Annotated, Sequence
 
@@ -11,16 +12,29 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, AIMess
 from app.modules.embedding.service import get_embedding_model
 from app.modules.llm.service import get_groq_llm, get_qa_prompt
 from app.modules.vectorstore.service import build_supabase_from_documents, load_supabase
-from app.modules.document.service import chunk_documents, load_text_file
+from app.modules.document.service import chunk_documents, load_text_file,DocumentService
 from app.modules.retrieval.service import get_retriever, retrieve
+
+
+# Import from new modular structure
+from app import pipeline as app_pipeline
+from app.modules.embedding.service import EmbeddingService
+from app.modules.vectorstore.service import VectorStoreService
 
 
 class RAGState(TypedDict, total=False):
     # Inputs / config
-    input_path: str
     table_name: str
     query_name: str
     rebuild: bool
+
+    # Document
+    filename: str
+    content: Optional[str] = None
+    # input_path: str
+    metadata : str =None
+    chunks: List[Document]
+
 
     embeddings_model: str
 
@@ -40,30 +54,31 @@ class RAGState(TypedDict, total=False):
 
     # Artifacts
     docs: List[Document]
-    chunks: List[Document]
     answer: str
 
-# Nodes
-
-def node_load(state: RAGState) -> Dict[str, Any]:
-    """Load documents from file if input_path is provided"""
-    input_path = state.get("input_path")
-    if input_path:
-        try:
-            docs = load_text_file(input_path)
-            return {"docs": docs}
-        except Exception:
-            return {"docs": []}
-    return {"docs": []}
 
 
-def node_chunk(state: RAGState) -> Dict[str, Any]:
-    """Chunk documents for embedding"""
-    docs = state.get("docs", [])
-    if not docs:
-        return {"chunks": []}
-    chunks = chunk_documents(docs)
-    return {"chunks": chunks}
+#  LangGraph Nodes
+
+def document_service_node(
+    state: RAGState,
+    uploaded_file: uploaded_file
+    )-> Dict[str, Any]:
+    # initiate the service
+    doc_service = DocumentService()
+    # load the file
+    file = doc_service.load_text_file(uploaded_file)
+    # chunk the file
+    file_chunks = doc_service.chunk_documents(file)
+    # get the metadata
+    metadata = doc_service.get_document_metadata(file)  
+    
+    return{
+        "content": file.page_content,
+        "metadata": metadata,
+        "chunks": file_chunks
+    }
+        
 
 
 def node_vectorstore(state: RAGState) -> Dict[str, Any]:
