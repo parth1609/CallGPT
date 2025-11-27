@@ -56,8 +56,6 @@ class RetrievalService:
     def similarity_search(
         self,
         query: str,
-        table_name: str = None,
-        query_function: str = None,
         k: int = 4,
         threshold: float = 0.5,
         embedding_model: Optional[str] = None,
@@ -67,8 +65,6 @@ class RetrievalService:
         
         Parameters:
         - query: Search query text
-        - table_name: Ignored (kept for API compatibility)
-        - query_function: Ignored (kept for API compatibility)
         - k: Number of results
         - threshold: Similarity threshold (score filter)
         - embedding_model: Model for query embedding
@@ -111,9 +107,7 @@ class RetrievalService:
     
     def mmr_search(
         self,
-        query: str,
-        table_name: str = None,
-        query_function: str = None,
+        text_query: str,
         k: int = 4,
         fetch_k: int = 20,
         lambda_mult: float = 0.5,
@@ -127,8 +121,6 @@ class RetrievalService:
         
         Parameters:
         - query: Search query
-        - table_name: Ignored (kept for API compatibility)
-        - query_function: Ignored (kept for API compatibility)
         - k: Final number of results
         - fetch_k: Number of candidates to fetch
         - lambda_mult: Diversity factor (0=max diversity, 1=max relevance)

@@ -5,9 +5,13 @@ Purpose: Business logic for Vector Store Service using Pinecone.
 import os
 import time
 from typing import List, Optional, Dict, Any
+import numpy as np
 from pinecone import Pinecone, ServerlessSpec
 from uuid import uuid4
 from dotenv import load_dotenv
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+from supabase import Client, create_client
 
 
 load_dotenv()
@@ -16,17 +20,29 @@ load_dotenv()
 class VectorStoreService:
     """Manages vector database operations with Pinecone"""
     
-    def __init__(self, pinecone_api_key: Optional[str] = None):
-        """Initialize Vector Store Service with Pinecone connection"""
+    def __init__(self, pinecone_api_key: Optional[str] = None, embeddings: Optional[Embeddings] = None, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None):
+        """Initialize Vector Store Service with Pinecone and Supabase connection"""
+        # Pinecone Init
         self.pinecone_api_key = pinecone_api_key or os.getenv("PINECONE_API_KEY")
-        if not self.pinecone_api_key:
-            raise ValueError("PINECONE_API_KEY must be provided")
-        self.pc: Pinecone = Pinecone(api_key=self.pinecone_api_key)
+        if self.pinecone_api_key:
+            self.pc: Pinecone = Pinecone(api_key=self.pinecone_api_key)
+            self.cloud = os.getenv("PINECONE_CLOUD", "aws")
+            self.region = os.getenv("PINECONE_REGION", "us-east-1")
+        
+        # Supabase Init
+        self.supabase_url = supabase_url or os.getenv("SUPABASE_URL")
+        self.supabase_key = supabase_key or os.getenv("SUPABASE_API_KEY") or os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
+        
+        if self.supabase_url and self.supabase_key:
+            self.supabase_client: Client = create_client(self.supabase_url, self.supabase_key)
+        
+        self.embeddings = embeddings
         # SUPABASE BUCKET = INDEX NAME (Organisation name)
         self.default_index = os.getenv("SUPABASE_BUCKET")
-        self.cloud = os.getenv("PINECONE_CLOUD", "aws")
-        self.region = os.getenv("PINECONE_REGION", "us-east-1")
-        print(f"DEBUG: VectorStoreService init. Index: {self.default_index}, API Key: {self.pinecone_api_key[:4]}...")
+        self.table_name = "documents" # Default table name for Supabase
+        self.query_name = "match_documents" # Default query function for Supabase
+
+        print(f"DEBUG: VectorStoreService init. Index: {self.default_index}")
     
     def _ensure_index(
         self,
@@ -215,121 +231,196 @@ class VectorStoreService:
         except Exception as e:
             raise Exception(f"Failed to delete index: {str(e)}")
 
+    # ============================================================================
+    # Supabase Methods (Ported from CustomSupabaseVectorStore)
+    # ============================================================================
 
-# ============================================================================
-# Pipeline Utilities - Supabase Vector Store (Backend-compatible functions)
-# ============================================================================
+    def similarity_search(
+        self,
+        query: str,
+        k: int = 4,
+        **kwargs: Any,
+    ) -> List[Document]:
+        """
+        Purpose: Perform similarity search using Supabase RPC.
+        
+        Parameters:
+        - query (str): Search query text.
+        - k (int): Number of results to return.
+        
+        Return Value:
+        - List[Document]: Matching documents.
+        """
+        if not self.supabase_client or not self.embeddings:
+            raise ValueError("Supabase client and embeddings must be initialized for similarity search")
 
-def _supabase_client():
-    """
-    Purpose: Create Supabase client for pgvector operations.
+        # Generate embedding for the query
+        query_embedding = self.embeddings.embed_query(query)
+        
+        # Call Supabase RPC function
+        response = self.supabase_client.rpc(
+            self.query_name,
+            {
+                "query_embedding": query_embedding,
+                "match_count": k,
+            }
+        ).execute()
+        
+        # Convert results to LangChain Documents
+        documents = []
+        for row in response.data:
+            doc = Document(
+                page_content=row.get("content", ""),
+                metadata=row.get("metadata", {}),
+            )
+            documents.append(doc)
+        
+        return documents
     
-    Return Value:
-    - Client: Supabase client instance.
+    def max_marginal_relevance_search(
+        self,
+        query: str,
+        k: int = 4,
+        fetch_k: int = 20,
+        lambda_mult: float = 0.5,
+        **kwargs: Any,
+    ) -> List[Document]:
+        """
+        Purpose: Perform MMR search (fetch more, then diversify).
+        
+        Parameters:
+        - query (str): Search query text.
+        - k (int): Final number of results.
+        - fetch_k (int): Initial candidates to fetch.
+        - lambda_mult (float): Diversity factor [0,1].
+        
+        Return Value:
+        - List[Document]: Diversified documents.
+        
+        Side Effects:
+        - Fetches fetch_k candidates, applies MMR locally.
+        """
+        if not self.supabase_client or not self.embeddings:
+            raise ValueError("Supabase client and embeddings must be initialized for MMR search")
+
+        # Generate embedding for the query
+        query_embedding = self.embeddings.embed_query(query)
+        
+        # Fetch more candidates than needed
+        response = self.supabase_client.rpc(
+            self.query_name,
+            {
+                "query_embedding": query_embedding,
+                "match_count": fetch_k,
+            }
+        ).execute()
+        
+        # Convert to Documents
+        candidates = []
+        candidate_embeddings = []
+        
+        for row in response.data:
+            doc = Document(
+                page_content=row.get("content", ""),
+                metadata=row.get("metadata", {}),
+            )
+            candidates.append(doc)
+            # If embeddings are returned, use them; otherwise re-embed
+            if "embedding" in row:
+                candidate_embeddings.append(row["embedding"])
+            else:
+                candidate_embeddings.append(self.embeddings.embed_query(doc.page_content))
+        
+        # Apply MMR locally
+        from langchain_community.vectorstores.utils import maximal_marginal_relevance
+        
+        # Convert to numpy arrays (MMR expects numpy arrays with .ndim attribute)
+        query_embedding_np = np.array(query_embedding)
+        candidate_embeddings_np = np.array(candidate_embeddings)
+        
+        if len(candidates) == 0:
+            return []
+
+        selected_indices = maximal_marginal_relevance(
+            query_embedding_np,
+            candidate_embeddings_np,
+            lambda_mult=lambda_mult,
+            k=k,
+        )
+        
+        return [candidates[i] for i in selected_indices]
     
-    Side Effects:
-    - Requires SUPABASE_URL and SUPABASE_API_KEY environment variables.
-    """
-    from supabase import create_client
-    
-    url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_API_KEY") or os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
-    if not url or not key:
-        raise RuntimeError("SUPABASE_URL and SUPABASE_API_KEY (or SERVICE_KEY or KEY) must be set")
-    return create_client(url, key)
+    def as_retriever(self, *, search_type: str = "similarity", search_kwargs: Dict[str, Any] = None):
+        """
+        Purpose: Create a LangChain retriever interface.
+        
+        Parameters:
+        - search_type (str): 'similarity' or 'mmr'.
+        - search_kwargs (Dict): Additional search parameters (k, fetch_k, lambda_mult).
+        
+        Return Value:
+        - CustomRetriever: Object with invoke() method.
+        """
+        from langchain_core.retrievers import BaseRetriever
+        from langchain_core.callbacks import CallbackManagerForRetrieverRun
+        
+        search_kwargs = search_kwargs or {}
+        
+        # Capture self to use in inner class
+        service_instance = self
+
+        class CustomRetriever(BaseRetriever):
+            search_type_: str
+            search_kwargs_: Dict[str, Any]
+            
+            def _get_relevant_documents(
+                self,
+                query: str,
+                *,
+                run_manager: CallbackManagerForRetrieverRun = None,
+            ) -> List[Document]:
+                if self.search_type_ == "mmr":
+                    return service_instance.max_marginal_relevance_search(query, **self.search_kwargs_)
+                else:
+                    return service_instance.similarity_search(query, **self.search_kwargs_)
+        
+        return CustomRetriever(
+            search_type_=search_type,
+            search_kwargs_=search_kwargs,
+        )
+
+    def upsert_documents(
+        self,
+        docs: List[Document],
+        chunk_size: int = 500,
+    ) -> str:
+        """
+        Upsert documents to Supabase.
+        """
+        if not self.supabase_client or not self.embeddings:
+             raise ValueError("Supabase client and embeddings must be initialized")
+        
+        from uuid import uuid4
+        
+        # Generate embeddings
+        texts = [doc.page_content for doc in docs]
+        vectors = self.embeddings.embed_documents(texts)
+        
+        records = []
+        for doc, vector in zip(docs, vectors):
+            records.append({
+                "id": str(uuid4()),
+                "content": doc.page_content,
+                "metadata": doc.metadata or {},
+                "embedding": vector,
+            })
+            
+        for i in range(0, len(records), chunk_size):
+            batch = records[i:i + chunk_size]
+            self.supabase_client.table(self.table_name).insert(batch).execute()
+            
+        return self.table_name
 
 
-def build_supabase_from_documents(
-    docs: List,
-    embeddings,
-    table_name: str = "documents",
-    *,
-    query_name: str = "match_documents",
-    chunk_size: int = 500,
-) -> str:
-    """
-    Purpose: Upsert chunked documents + embeddings into Supabase (pgvector).
-    
-    This utility function builds a Supabase vector store from documents,
-    following the backend pattern for pipeline usage.
-
-    Parameters:
-    - docs (List[Document]): Documents to insert.
-    - embeddings (Embeddings): LangChain embeddings model.
-    - table_name (str): Supabase table name.
-    - query_name (str): RPC function name for vector search.
-    - chunk_size (int): Batch size for inserts.
-
-    Return Value:
-    - str: Table name used.
-
-    Side Effects:
-    - Inserts documents with embeddings into Supabase table via direct insert.
-    
-    Examples:
-    >>> from langchain_core.documents import Document
-    >>> from app.modules.embedding.service import get_embedding_model
-    >>> # docs = [Document(page_content="test")]
-    >>> # emb = get_embedding_model()
-    >>> # build_supabase_from_documents(docs, emb)
-    """
-    from uuid import uuid4
-    
-    sb = _supabase_client()
-    
-    # Generate embeddings for all documents
-    texts = [doc.page_content for doc in docs]
-    vectors = embeddings.embed_documents(texts)
-    
-    # Prepare batch insert records
-    records = []
-    for doc, vector in zip(docs, vectors):
-        records.append({
-            "id": str(uuid4()),
-            "content": doc.page_content,
-            "metadata": doc.metadata or {},
-            "embedding": vector,
-        })
-    
-    # Batch insert in chunks to avoid payload limits
-    for i in range(0, len(records), chunk_size):
-        batch = records[i:i + chunk_size]
-        sb.table(table_name).insert(batch).execute()
-    
-    return table_name
 
 
-def load_supabase(
-    table_name: str,
-    embeddings,
-    *,
-    query_name: str = "match_documents",
-):
-    """
-    Purpose: Load a CustomSupabaseVectorStore for querying.
-    
-    This utility function creates a Supabase vector store instance,
-    following the backend pattern for pipeline usage.
-    
-    Parameters:
-    - table_name (str): Supabase table name.
-    - embeddings (Embeddings): Embedding model instance.
-    - query_name (str): RPC function name for vector search.
-    
-    Return Value:
-    - CustomSupabaseVectorStore: Vector store instance for retrieval.
-    
-    Examples:
-    >>> from app.modules.embedding.service import get_embedding_model
-    >>> # emb = get_embedding_model()
-    >>> # vstore = load_supabase("documents", emb)
-    """
-    from .custom_store import CustomSupabaseVectorStore
-    
-    sb = _supabase_client()
-    return CustomSupabaseVectorStore(
-        client=sb,
-        embeddings=embeddings,
-        table_name=table_name,
-        query_name=query_name,
-    )
