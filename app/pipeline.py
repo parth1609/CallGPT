@@ -14,6 +14,7 @@ from app.modules.embedding.service import get_embedding_model
 from app.modules.llm.service import get_groq_llm, get_qa_prompt,LLMService
 from app.modules.document.service import chunk_documents, load_text_file,DocumentService
 from app.modules.retrieval.service import get_retriever, retrieve, RetrievalService
+from app.modules.conversation.service import ConversationService
 
 
 # Import from new modular structure
@@ -42,16 +43,17 @@ class RAGState(TypedDict, total=False):
     chunk_overlap: Optional[int]
     embeddings_model: str
 
-    llm_model: str
+    #llm
     temperature: float
+    template: str
+    question: str
 
+    # retrieva
     search_type: str
     k: int
     fetch_k: int
     lambda_mult: float
 
-    template: str
-    question: str
 
     # Conversational memory (accumulated across turns via checkpointer)
     messages: Annotated[Sequence[BaseMessage], add_messages]
@@ -135,10 +137,13 @@ def node_vectorstore(state: RAGState) -> Dict[str, Any]:
 
 def node_answer(state: RAGState):
     """Retrieve documents and generate answer with streaming from pinecone vector store"""
+    # Retrieval service
     retriever_service = RetrievalService(
         index_name = state.get("bucket_name").lower(),
     )
+    # LLm Service
     llm_service = LLMService()
+
     query = state.get("question") 
     # convert query to embedding => embeddings[0]
     query_embedding = retriever_service._get_query_embedding(query)
@@ -164,20 +169,36 @@ def node_answer(state: RAGState):
     docs = retriever_service.retrieve(retriever, query)
     context = "\n\n".join(d.page_content for d in docs)
 
-    # Create LLM ephemerally
-    temperature = state.get("temperature", 0.1)
-    llm = get_groq_llm(model=state.get("llm_model", "openai/gpt-oss-120b"), temperature=temperature)
-
-
     # Create the full message list
     history = list(state.get("messages", []))
     current = prompt.format_messages(context=context, question=state.get("question"))
     messages = [*history, *current]
-
+    
+    # Convert LangChain messages to dict format for LLMService
+    # LangChain messages have .type and .content attributes
+    messages_dict = []
+    for msg in messages:
+        if hasattr(msg, 'type') and hasattr(msg, 'content'):
+            # Map LangChain message types to role
+            role_mapping = {
+                'system': 'system',
+                'human': 'user',
+                'ai': 'assistant',
+            }
+            role = role_mapping.get(msg.type, 'user')
+            messages_dict.append({
+                "role": role,
+                "content": msg.content
+            })
+    
     # Stream tokens and yield AI message chunks for smoother UI
     answer_accum = ""
-    for chunk in llm.stream(messages):
-        delta = getattr(chunk, "content", "")
+    for chunk in llm_service.stream_chat(
+        messages=messages_dict,
+        model=state.get("llm_model", "openai/gpt-oss-120b"),
+        temperature=state.get("temperature", 0.5),
+    ):
+        delta = chunk.get("content", "")
         if not delta:
             continue
         answer_accum += delta
@@ -192,6 +213,7 @@ def node_answer(state: RAGState):
             AIMessage(content=answer_accum),
         ],
     }
+
 
 
 def Orgs_pipeline(checkpointer: Optional[Any] = None) -> Any:
