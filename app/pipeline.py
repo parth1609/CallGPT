@@ -57,9 +57,8 @@ class RAGState(TypedDict, total=False):
 
     # Conversational memory (accumulated across turns via checkpointer)
     messages: Annotated[Sequence[BaseMessage], add_messages]
+    thread_id: Optional[str]  # Thread identifier for conversation tracking
 
-    # Artifacts
-    docs: List[Document]
     answer: str
 
 
@@ -246,26 +245,74 @@ def Orgs_pipeline(checkpointer: Optional[Any] = None) -> Any:
    
     return builder.compile(checkpointer=checkpointer)
 
-def customer_pipeline():
+
+
+def node_save_conversation(state: RAGState) -> Dict[str, Any]:
     """
-    Purpose: Build a simplified customer-facing RAG graph for Q&A.
+    Save conversation to PostgreSQL (fails gracefully if DATABASE_URL not set).
     
-    This pipeline is designed for customer interactions where documents are
-    already loaded and indexed. It only handles the query and answer flow.
+    Provides persistent storage for analytics and auditing.
+    """
+    thread_id = state.get("thread_id")
+    if not thread_id:
+        return {}
+    
+    try:
+        conv_service = ConversationService()
+        
+        # Ensure thread exists
+        if not conv_service.get_thread(thread_id):
+            conv_service.create_thread(
+                metadata={"bucket_name": state.get("bucket_name")}
+            )
+        
+        # Save messages
+        if state.get("question"):
+            conv_service.add_message(thread_id, "user", state.get("question"), {})
+        if state.get("answer"):
+            conv_service.add_message(thread_id, "assistant", state.get("answer"), {})
+        
+        conv_service.close()
+    except Exception as e:
+        print(f"Warning: Failed to save conversation: {e}")
+    
+    return {}
+
+
+def customer_pipeline(checkpointer: Optional[Any] = None):
+    """
+    Enhanced customer pipeline with backend-centric conversation management.
+    
+    Frontend only needs to provide:
+    - question: str
+    - thread_id: str
+    - bucket_name: str
+    
+    Backend handles:
+    - Loading conversation history (via checkpointer)
+    - Applying default configurations
+    - Vector search and retrieval
+    - LLM response generation
+    - Conversation persistence to PostgreSQL
     
     Return Value:
-    - Compiled LangGraph application
+    - Compiled LangGraph application with checkpointer
     
     Graph Flow:
-    START -> answer -> END
+    START → vectorstore → answer → save_conversation → END
     """
     builder = StateGraph(RAGState)
-    builder.add_node("answer", node_answer)
+    
+    # Add nodes 
     builder.add_node("vectorstore", node_vectorstore)
-
+    builder.add_node("answer", node_answer)
+    builder.add_node("save_conversation", node_save_conversation)
+    
+    # Build flow
     builder.add_edge(START, "vectorstore")
     builder.add_edge("vectorstore", "answer")
-    builder.add_edge("answer", END)
-
-    return builder.compile()
+    builder.add_edge("answer", "save_conversation")
+    builder.add_edge("save_conversation", END)
+    
+    return builder.compile(checkpointer=checkpointer)
 
