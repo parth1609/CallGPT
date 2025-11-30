@@ -1,7 +1,9 @@
 httpx
 python-multipart
 psycopg2-binary
+psycopg[binary]
 make
+requests
 
 #python libraries
 fastapi
@@ -24,5 +26,5 @@ langchain-huggingface
 langchain-pinecone
 langchain-core
 langgraph
-langgraph-checkpoint-sqlite
+langgraph-checkpoint-postgres
 langchain-community

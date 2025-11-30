@@ -102,6 +102,9 @@ class VectorStoreService:
         Returns:
         - Dict with success status and inserted count
         """
+        if chunks is None or embeddings is None:
+            raise ValueError("Chunks and embeddings must be provided and non-null")
+
         if len(chunks) != len(embeddings):
             raise ValueError("Chunks and embeddings must have same length")
 
