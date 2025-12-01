@@ -2,22 +2,13 @@ import os
 import uuid
 import tempfile
 import streamlit as st
+import requests
 from dotenv import load_dotenv
-    
-from app.modules.document.router import upload_document
-from app.pipeline import (
-    Organisations,
-    customer,
-    # generate_thread_id,
-    # load_conversation,
-    # retrieve_all_threads,
-    # thread_document_metadata,
-    # thread_has_document,
-    )
-from langchain_core.messages import HumanMessage, BaseMessage
-from langgraph.checkpoint.postgres import PostgresSaver
 
 load_dotenv(override=False)
+
+# API Configuration
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 st.set_page_config(
     page_title="CallGPT",
@@ -60,6 +51,17 @@ def render_org():
     st.subheader("📄 Organization")
     st.caption("Upload and index your organization's documents")
 
+    # Check API connection
+    try:
+        health_response = requests.get(f"{API_BASE_URL}/api/v1/pipeline/health", timeout=2)
+        if health_response.status_code == 200:
+            st.sidebar.success("✅ API Connected")
+        else:
+            st.sidebar.warning("⚠️ API Not Responding")
+    except:
+        st.sidebar.error("❌ API Offline")
+        st.sidebar.caption(f"URL: {API_BASE_URL}")
+
     st.sidebar.subheader("⚙️ Org Configuration")
     bucket_name = st.sidebar.text_input("Bucket/Index Name", value="openai-bucket")
     chunk_size = st.sidebar.slider("Chunk Size", 500, 2000, 1000, 100)
@@ -89,49 +91,56 @@ def render_org():
             
             if st.button("🚀 Process and Index Document", type="primary", use_container_width=True):
                 try:
-                    # Save uploaded file to temporary location
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode='wb') as tmp_file:
-                        tmp_file.write(uploaded_file.getvalue())
-                        tmp_file_path = tmp_file.name
-                        print(tmp_file_path)
-                    
-                    # Build state for the pipeline
-                    state = {
-                        "bucket_name": bucket_name,
-                        "chunk_size": chunk_size,
-                        "chunk_overlap": chunk_overlap,
-                        "embeddings_model": embeddings_model,
-                        "rebuild": rebuild,
-                        "uploaded_file_path": tmp_file_path,
-                        "filename": uploaded_file.name,
-                        "thread_id": str(uuid.uuid4()),
+                    # Prepare multipart form data
+                    files = {
+                        'file': (uploaded_file.name, uploaded_file.getvalue(), 'text/plain')
                     }
                     
-                    # Execute the pipeline
+                    # Prepare query parameters
+                    params = {
+                        'bucket_name': bucket_name,
+                        'embeddings_model': embeddings_model,
+                        'chunk_size': chunk_size,
+                        'chunk_overlap': chunk_overlap,
+                    }
+                    
+                    # Call the pipeline API endpoint
                     with st.spinner("Processing document... This may take a moment."):
-                        result = Organisations.invoke(state)
+                        response = requests.post(
+                            f"{API_BASE_URL}/api/v1/pipeline/organisations/upload-file",
+                            files=files,
+                            params=params,
+                            timeout=300  # 5 minutes timeout for large files
+                        )
                     
-                    # Display results
-                    st.success("✅ Document processed and indexed successfully!")
-                    
-                    with st.expander("📊 Processing Details", expanded=True):
-                        if "filename" in result:
-                            st.write(f"**Filename:** {result['filename']}")
-                        if "metadata" in result:
-                            st.write(f"**Metadata:** {result['metadata']}")
-                        if "chunks" in result:
-                            chunks_value = result.get("chunks")
-                            chunks_count = len(chunks_value) if chunks_value is not None else 0
-                            st.write(f"**Chunks created:** {chunks_count}")
-                        if "dimension" in result:
-                            st.write(f"**Embedding dimension:** {result['dimension']}")
-                    
-                    # Clean up temporary file
-                    try:
-                        os.unlink(tmp_file_path)
-                    except:
-                        pass
+                    # Check response
+                    if response.status_code == 201:
+                        result = response.json()
                         
+                        # Display results
+                        st.success("✅ Document processed and indexed successfully!")
+                        
+                        with st.expander("📊 Processing Details", expanded=True):
+                            st.write(f"**Status:** {result.get('status', 'N/A')}")
+                            st.write(f"**Message:** {result.get('message', 'N/A')}")
+                            st.write(f"**Filename:** {result.get('filename', 'N/A')}")
+                            st.write(f"**Bucket/Index:** {result.get('bucket_name', 'N/A')}")
+                            st.write(f"**Chunks created:** {result.get('chunks_created', 0)}")
+                            
+                            if result.get('metadata'):
+                                st.write(f"**Metadata:**")
+                                st.json(result['metadata'])
+                    else:
+                        # Handle error response
+                        error_detail = response.json().get('detail', 'Unknown error')
+                        st.error(f"❌ Error processing document: {error_detail}")
+                        st.error(f"Status code: {response.status_code}")
+                        
+                except requests.exceptions.ConnectionError:
+                    st.error("❌ Error: Could not connect to API server. Please ensure the FastAPI server is running.")
+                    st.info("💡 Start the server with: `uvicorn app.main:app --reload`")
+                except requests.exceptions.Timeout:
+                    st.error("❌ Error: Request timed out. The file might be too large or processing is taking too long.")
                 except Exception as e:
                     st.error(f"❌ Error processing document: {str(e)}")
                     st.exception(e)
@@ -242,9 +251,13 @@ st.divider()
 
 # Info section
 st.markdown("### ℹ️ About")
-st.info("""
+st.info(f"""
 **CallGPT** is a Retrieval-Augmented Generation (RAG) system that allows organizations to:
-- Index their documents efficiently
+- Index their documents efficiently using LangGraph pipelines
 - Enable customers to chat with document collections
 - Get accurate, context-aware responses powered by LLMs
+
+**Architecture:** This Streamlit frontend communicates with a FastAPI backend via REST API.
+
+**API Endpoint:** `{API_BASE_URL}`
 """)

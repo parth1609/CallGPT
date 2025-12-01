@@ -7,6 +7,7 @@ from app.modules.llm.router import router as llm_router
 from app.modules.conversation.router import router as conversation_router
 from app.modules.document.router import router as document_router
 from app.modules.vectorstore.router import router as vectorstore_router
+from app.modules.pipeline.router import router as pipeline_router
 
 app = FastAPI(
     title=settings.APP_TITLE,
@@ -30,6 +31,7 @@ app.include_router(llm_router, prefix="/api/v1/llm", tags=["LLM"])
 app.include_router(conversation_router, prefix="/api/v1/conversations", tags=["Conversation"])
 app.include_router(document_router, prefix="/api/v1/documents", tags=["Documents"])
 app.include_router(vectorstore_router, prefix="/api/v1/vectorstore", tags=["VectorStore"])
+app.include_router(pipeline_router, prefix="/api/v1/pipeline", tags=["Pipeline"])
 
 @app.get("/health")
 async def health_check():
