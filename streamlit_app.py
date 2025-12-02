@@ -10,6 +10,7 @@ load_dotenv(override=False)
 # API Configuration
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
+from app.modules.pipeline.pipeline import customer
 st.set_page_config(
     page_title="CallGPT",
     page_icon="💬",
@@ -147,105 +148,131 @@ def render_org():
         else:
             st.warning("👆 Please upload a text file to begin processing")
     
-# def render_customer():
-#     st.subheader("💬 Customer Chat")
-#     st.caption("Ask questions about your indexed documents")
 
-#     if "checkpointer" not in st.session_state:
-#         db_url = os.getenv("DATABASE_URL")
-#         if db_url:
-#             try:
-#                 cp = PostgresSaver.from_conn_string(db_url)
-#                 cp.setup()
-#                 st.session_state.checkpointer = cp
-#             except Exception as e:
-#                 st.warning(f"Could not connect to PostgreSQL: {e}")
-#                 st.session_state.checkpointer = None
-#         else:
-#             st.session_state.checkpointer = None
+def render_customer():
+    """Customer chat interface using the customer pipeline from pipeline.py"""
+    st.subheader("💬 Customer Chat")
+    st.caption("Ask questions about your indexed documents")
 
-#     # Initialize thread_id if not present
-#     if "thread_id" not in st.session_state:
-#         st.session_state.thread_id = str(uuid.uuid4())
+    # Import customer pipeline from pipeline.py
+    from app.modules.pipeline.pipeline import customer
     
-#     # Compile customer graph with checkpointer
-#     if "chatbot" not in st.session_state:
-#         st.session_state.chatbot = customer_pipeline.compile(checkpointer=st.session_state.checkpointer)
+    # Initialize thread_id if not present
+    if "thread_id" not in st.session_state:
+        st.session_state.thread_id = str(uuid.uuid4())
     
-#     if "chat_history" not in st.session_state:
-#         st.session_state.chat_history = []
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
 
-#     if st.session_state.chatbot and not st.session_state.chat_history and st.session_state.get("thread_id"):
-#         messages = load_conversation(st.session_state.chatbot, st.session_state.thread_id)
-#         for msg in messages:
-#             role = "user" if isinstance(msg, HumanMessage) else "assistant"
-#             if not (hasattr(msg, '__class__') and 'Chunk' in msg.__class__.__name__):
-#                 st.session_state.chat_history.append({"role": role, "content": msg.content})
+    # Sidebar settings
+    st.sidebar.subheader("⚙️ Chat Settings")
+    bucket_name = st.sidebar.text_input("Bucket/Index Name", value="openai-bucket")
+    
+    with st.sidebar.expander("🔧 Advanced Settings", expanded=False):
+        embeddings_model = st.text_input("Embeddings Model", value="sentence-transformers/all-MiniLM-L6-v2")
+        llm_model = st.text_input("LLM Model", value="openai/gpt-oss-120b")
+        temperature = st.slider("Temperature", 0.0, 1.0, 0.5, 0.1)
+        k = st.slider("Top-K Results", 1, 10, 4)
+        search_type = st.selectbox("Search Type", ["similarity_search", "mmr_search"], index=0)
+        
+        # Reranking settings
+        st.markdown("---")
+        st.markdown("**🎯 Reranking (Two-Stage Retrieval)**")
+        use_reranker = st.checkbox("Enable Reranking", value=False, help="Improves accuracy by reranking initial results")
+        if use_reranker:
+            fetch_k = st.slider("Initial Candidates", 10, 50, 20, help="Number of candidates to retrieve before reranking")
+            reranker_model = st.selectbox(
+                "Reranker Model",
+                ["bge-reranker-v2-m3", "bge-reranker-base", "bge-reranker-large"],
+                index=0
+            )
+        else:
+            fetch_k = 20
+            reranker_model = "bge-reranker-v2-m3"
 
-#     st.sidebar.subheader("⚙️ Chat Settings")
-#     bucket_name = st.sidebar.text_input("Bucket/Index Name", value="documents")
-#     with st.sidebar.expander("🔧 Advanced Settings", expanded=False):
-#         temperature = st.slider("Temperature", 0.0, 1.0, 0.1, 0.1)
-#         k = st.slider("Top-K Results", 1, 10, 4)
-#         search_type = st.selectbox("Search Type", ["similarity_search", "mmr_search"], index=0)
-#         use_defaults = st.checkbox("Use Backend Defaults", value=True)
+    # New conversation button
+    if st.sidebar.button("➕ New Conversation", use_container_width=True, type="primary"):
+        st.session_state.thread_id = str(uuid.uuid4())
+        st.session_state.chat_history = []
+        st.rerun()
+    
+    st.sidebar.caption(f"Thread ID: {st.session_state.thread_id[:8]}...")
 
-#     if st.sidebar.button("➕ New Conversation", use_container_width=True, type="primary"):
-#         st.session_state.thread_id = str(uuid.uuid4())
-#         st.session_state.chat_history = []
-#         st.rerun()
-#     st.sidebar.caption(f"Thread ID: {st.session_state.thread_id[:8]}...")
+    # Display chat history
+    for message in st.session_state.chat_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-#     for message in st.session_state.chat_history:
-#         with st.chat_message(message["role"]):
-#             st.markdown(message["content"])
+    # Chat input
+    if user_input := st.chat_input("Ask a question about your documents"):
+        # Add user message to history
+        st.session_state.chat_history.append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.markdown(user_input)
 
-#     if user_input := st.chat_input("Ask a question about your documents"):
-#         st.session_state.chat_history.append({"role": "user", "content": user_input})
-#         with st.chat_message("user"):
-#             st.markdown(user_input)
+        # Prepare state for customer pipeline
+        state = {
+            "question": user_input,
+            "thread_id": st.session_state.thread_id,
+            "bucket_name": bucket_name,
+            "embeddings_model": embeddings_model,
+            "llm_model": llm_model,
+            "temperature": temperature,
+            "k": k,
+            "search_type": search_type,
+            "use_reranker": use_reranker,
+            "fetch_k": fetch_k,
+            "reranker_model": reranker_model,
+            "messages": [],  # Will be managed by the pipeline
+        }
 
-#         if use_defaults:
-#             state = {"question": user_input, "thread_id": st.session_state.thread_id, "bucket_name": bucket_name}
-#         else:
-#             state = {
-#                 "question": user_input,
-#                 "thread_id": st.session_state.thread_id,
-#                 "bucket_name": bucket_name,
-#                 "temperature": temperature,
-#                 "k": k,
-#                 "search_type": search_type,
-#             }
+        # Stream response from customer pipeline
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                try:
+                    placeholder = st.empty()
+                    full_response = ""
+                    
+                    # Stream from customer pipeline
+                    # Pipeline flow: START → answer → save_conversation → END
+                    for event in customer.stream(
+                        state,
+                        config={"configurable": {"thread_id": st.session_state.thread_id}},
+                        stream_mode="updates"
+                    ):
+                        # Handle answer node streaming
+                        if "answer" in event:
+                            chunk = event["answer"]
+                            
+                            # Check for message chunks (streaming tokens)
+                            if "messages" in chunk:
+                                for msg in chunk["messages"]:
+                                    if hasattr(msg, "content") and msg.content:
+                                        full_response += msg.content
+                                        placeholder.markdown(full_response + "▌")
+                            
+                            # Check for final answer
+                            if "answer" in chunk:
+                                full_response = chunk["answer"]
+                    
+                    # Display final response
+                    placeholder.markdown(full_response)
+                    st.session_state.chat_history.append({"role": "assistant", "content": full_response})
+                    
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+                    st.exception(e)
 
-#         with st.chat_message("assistant"):
-#             with st.spinner("Thinking..."):
-#                 try:
-#                     placeholder = st.empty()
-#                     full_response = ""
-#                     for event in st.session_state.chatbot.stream(state, config={"configurable": {"thread_id": st.session_state.thread_id}}, stream_mode="updates"):
-#                         if "answer" in event:
-#                             chunk = event["answer"]
-#                             if "messages" in chunk:
-#                                 for msg in chunk["messages"]:
-#                                     if hasattr(msg, "content") and msg.content:
-#                                         full_response += msg.content
-#                                         placeholder.markdown(full_response + "▌")
-#                     placeholder.markdown(full_response)
-#                     st.session_state.chat_history.append({"role": "assistant", "content": full_response})
-#                 except Exception as e:
-#                     st.error(f"Error: {e}")
-#                     st.exception(e)
 
 # Sidebar mode selector and renderer
 st.sidebar.markdown("---")
 mode = st.sidebar.radio("Select Mode", ["Org", "Customer"], index=0)
 st.sidebar.markdown("---")
 
-# if mode == "Org":
-    # render_org()
-# else:
-#     render_customer()
-render_org()
+if mode == "Org":
+    render_org()
+else:
+    render_customer()
 
 st.divider()
 
