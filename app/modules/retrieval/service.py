@@ -13,8 +13,7 @@ from app.modules.embedding.service import EmbeddingService
 
 # LangChain and Pinecone integrations for reranking
 try:
-    from langchain_pinecone import PineconeVectorStore
-    from langchain_community.retrievers import PineconeRerank
+    from langchain_pinecone import PineconeVectorStore, PineconeRerank
     from langchain_core.documents import Document as LangChainDocument
     RERANKING_AVAILABLE = True
 except ImportError:
