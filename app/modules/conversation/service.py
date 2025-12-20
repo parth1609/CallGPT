@@ -4,13 +4,19 @@ Manages conversation threads and message history using PostgreSQL.
 """
 
 import os
+import json
+import asyncio
+import selectors
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-import psycopg2
-from psycopg2.extras import RealDictCursor, Json
-from psycopg2.pool import SimpleConnectionPool
 from dotenv import load_dotenv
 from uuid import uuid4
+
+from psycopg_pool import AsyncConnectionPool
+from psycopg.rows import dict_row
+from pgvector.psycopg import register_vector_async
+from langgraph.prebuilt import create_react_agent
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
 
 
 load_dotenv()
@@ -31,58 +37,71 @@ class ConversationService:
         if not self.database_url:
             raise ValueError("DATABASE_URL must be provided")
         
-        # Create connection pool
-        self.pool = SimpleConnectionPool(
-            minconn=1,
-            maxconn=10,
-            dsn=self.database_url,
+        self.pool = AsyncConnectionPool(
+            conninfo=self.database_url,
+            max_size=15,
+            kwargs={
+                "autocommit": True,
+                "prepare_threshold": None,
+                "row_factory": dict_row,
+            },
+            open=False,  # Don't open automatically
         )
-        
-        self._initialize_schema()
     
-    def _initialize_schema(self):
-        """
-        Initialize database schema if not exists.
-        
-        Side Effects:
-        - Creates threads, messages, and checkpoints tables
-        """
-        conn = self.pool.getconn()
-        try:
-            with conn.cursor() as cur:
-                # Create threads table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS threads (
-                        id TEXT PRIMARY KEY,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ DEFAULT NOW(),
-                        metadata JSONB DEFAULT '{}'::jsonb
-                    )
-                """)
-                
-                # Create messages table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS messages (
-                        id TEXT PRIMARY KEY,
-                        thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
-                        role VARCHAR(20) NOT NULL,
-                        content TEXT NOT NULL,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        metadata JSONB DEFAULT '{}'::jsonb
-                    )
-                """)
-                
-                # Create index on thread_id for faster queries
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_messages_thread_id 
-                    ON messages(thread_id)
-                """)
-                
-                conn.commit()
-        finally:
-            self.pool.putconn(conn)
+    async def open(self):
+        """Open the connection pool."""
+        await self.pool.open()
     
-    def create_thread(self, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def close(self):
+        """Close the connection pool."""
+        await self.pool.close()
+    
+    async def get_thread(self, thread_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a conversation thread by ID.
+        
+        Parameters:
+        - thread_id: ID of the thread
+        
+        Returns:
+        - Dict with thread information if found, None otherwise
+        """
+        async with self.pool.connection() as conn:
+            result = await conn.execute(
+                """
+                SELECT * FROM threads WHERE thread_id = %s
+                """,
+                (thread_id,)
+            )
+            row = await result.fetchone()
+            return dict(row) if row else None
+    
+    async def get_thread_messages(self, thread_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all messages for a thread.
+        
+        Parameters:
+        - thread_id: ID of the thread
+        
+        Returns:
+        - List of message dicts ordered by index
+        """
+        async with self.pool.connection() as conn:
+            result = await conn.execute(
+                """
+                SELECT messages_id, thread_id, index, type, content, created_at
+                FROM messages 
+                WHERE thread_id = %s 
+                ORDER BY index
+                """,
+                (thread_id,)
+            )
+            rows = await result.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def create_thread(self, 
+        metadata: Optional[Dict[str, Any]] = None,
+        ) -> Dict[str, Any]:
         """
         Create a new conversation thread.
         
@@ -93,346 +112,170 @@ class ConversationService:
         - Dict with thread information
         """
         thread_id = str(uuid4())
-        conn = self.pool.getconn()
         
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    INSERT INTO threads (id, metadata)
-                    VALUES (%s, %s)
-                    RETURNING id, created_at, updated_at, metadata
-                    """,
-                    (thread_id, Json(metadata or {}))
-                )
-                result = cur.fetchone()
-                conn.commit()
-                return dict(result)
-        finally:
-            self.pool.putconn(conn)
-    
-    def get_thread(self, thread_id: str) -> Optional[Dict[str, Any]]:
-        """Get thread by ID"""
-        conn = self.pool.getconn()
-        
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    "SELECT id, created_at, updated_at, metadata FROM threads WHERE id = %s",
-                    (thread_id,)
-                )
-                result = cur.fetchone()
-                return dict(result) if result else None
-        finally:
-            self.pool.putconn(conn)
-    
-    def list_threads(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
-        """List all threads with pagination"""
-        conn = self.pool.getconn()
-        
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT id, created_at, updated_at, metadata 
-                    FROM threads 
-                    ORDER BY updated_at DESC 
-                    LIMIT %s OFFSET %s
-                    """,
-                    (limit, offset)
-                )
-                results = cur.fetchall()
-                return [dict(r) for r in results]
-        finally:
-            self.pool.putconn(conn)
-    
-    def delete_thread(self, thread_id: str) -> bool:
-        """
-        Delete a thread and all its messages.
-        
-        Parameters:
-        - thread_id: Thread ID to delete
-        
-        Returns:
-        - True if deleted, False if not found
-        """
-        conn = self.pool.getconn()
-        
-        try:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM threads WHERE id = %s", (thread_id,))
-                deleted = cur.rowcount > 0
-                conn.commit()
-                return deleted
-        finally:
-            self.pool.putconn(conn)
-    
-    def add_message(
-        self,
-        thread_id: str,
-        role: str,
-        content: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        async with self.pool.connection() as conn:
+            result = await conn.execute(
+                """
+                INSERT INTO threads (thread_id, metadata)
+                VALUES (%s, %s)
+                RETURNING thread_id, created_at, updated_at, metadata
+                """,
+                (thread_id, json.dumps(metadata or {}))
+            )
+            row = await result.fetchone()
+            return dict(row)
+
+    async def add_thread_message(
+        self, 
+        thread_id: str, 
+        message_id: str,
+        index: int,
+        message_type: str,
+        content: str
     ) -> Dict[str, Any]:
         """
-        Add a message to a thread.
+        Add a message to the thread.
         
         Parameters:
-        - thread_id: Thread ID
-        - role: Message role ('user' or 'assistant')
+        - thread_id: ID of the thread
+        - message_id: Unique ID for the message
+        - index: Position of the message in the conversation
+        - message_type: Type of message (HumanMessage, AIMessage, etc.)
         - content: Message content
-        - metadata: Optional message metadata
         
         Returns:
         - Dict with message information
         """
-        message_id = str(uuid4())
-        conn = self.pool.getconn()
-        
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Insert message
-                cur.execute(
+        async with self.pool.connection() as conn:
+            result = await conn.execute(
+                """
+                INSERT INTO messages (messages_id, thread_id, index, type, content)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING messages_id, thread_id, index, type, content, created_at
+                """,
+                (message_id, thread_id, index, message_type, content)
+            )
+            row = await result.fetchone()
+            return dict(row)
+
+
+    async def list_threads(self, limit: int = 100) -> Dict[str, Any]:
+            """
+            list get the list of all threads
+            """
+            async with self.pool.connection() as conn:
+                result = await conn.execute(
                     """
-                    INSERT INTO messages (id, thread_id, role, content, metadata)
-                    VALUES (%s, %s, %s, %s, %s)
-                    RETURNING id, thread_id, role, content, created_at, metadata
-                    """,
-                    (message_id, thread_id, role, content, Json(metadata or {}))
-                )
-                result = cur.fetchone()
-                
-                # Update thread updated_at
-                cur.execute(
-                    "UPDATE threads SET updated_at = NOW() WHERE id = %s",
-                    (thread_id,)
-                )
-                
-                conn.commit()
-                return dict(result)
-        finally:
-            self.pool.putconn(conn)
-    
-    def get_messages(self, thread_id: str) -> List[Dict[str, Any]]:
-        """Get all messages for a thread"""
-        conn = self.pool.getconn()
-        
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
+                    SELECT * FROM threads
                     """
-                    SELECT id, thread_id, role, content, created_at, metadata 
-                    FROM messages 
-                    WHERE thread_id = %s 
-                    ORDER BY created_at ASC
-                    """,
-                    (thread_id,)
                 )
-                results = cur.fetchall()
-                return [dict(r) for r in results]
-        finally:
-            self.pool.putconn(conn)
+                rows  = await result.fetchall()
+                if not rows:
+                    return [] 
+                thread_ids = [row['thread_id'] for row in rows[:limit]]
+
+                import asyncio
+                task = [self.get_thread_messages(tid) for tid in thread_ids]
+
+                messages = await asyncio.gather(*task)
+                return [msg for msg in messages]
+
+
+
+           
+
+
+async def main():
+    """Main function to test the ConversationService with dummy messages."""
     
-    def get_thread_preview(self, thread_id: str, max_length: int = 50) -> Dict[str, Any]:
-        """
-        Get a preview of a thread (first user message).
-        
-        Parameters:
-        - thread_id: Thread ID
-        - max_length: Maximum length of preview text
-        
-        Returns:
-        - Dict with preview information
-        """
-        conn = self.pool.getconn()
-        
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Get first user message
-                cur.execute(
-                    """
-                    SELECT content, created_at 
-                    FROM messages 
-                    WHERE thread_id = %s AND role = 'user' 
-                    ORDER BY created_at ASC 
-                    LIMIT 1
-                    """,
-                    (thread_id,)
-                )
-                first_msg = cur.fetchone()
-                
-                # Get message count
-                cur.execute(
-                    "SELECT COUNT(*) as count FROM messages WHERE thread_id = %s",
-                    (thread_id,)
-                )
-                count_result = cur.fetchone()
-                
-                # Get thread updated_at
-                cur.execute(
-                    "SELECT updated_at FROM threads WHERE id = %s",
-                    (thread_id,)
-                )
-                thread_result = cur.fetchone()
-                
-                preview = "New conversation"
-                last_updated = datetime.utcnow()
-                
-                if first_msg:
-                    content = first_msg["content"]
-                    preview = content[:max_length] + ("..." if len(content) > max_length else "")
-                
-                if thread_result:
-                    last_updated = thread_result["updated_at"]
-                
-                return {
-                    "thread_id": thread_id,
-                    "preview": preview,
-                    "message_count": count_result["count"] if count_result else 0,
-                    "last_updated": last_updated,
-                }
-        finally:
-            self.pool.putconn(conn)
+    # Sample conversation data matching the JSON structure
+    sample_data = {
+        "threads": [
+            {
+                "thread_id": "1828b29e-ca3a-41a1-a5ed-4fb58e07b168",
+                "conversation": [
+                    {"index": 0, "type": "HumanMessage", "content": "my name is yash", "message_id": "ae2c0e2e-10b1-4bc7-853c-1cc18a455f7b"},
+                    {"index": 1, "type": "AIMessage", "content": "Hello Yash, nice to meet you! How can I help you today?", "message_id": "3907ed85-c7f8-4375-94a4-5dc7a54af8d3"},
+                    {"index": 2, "type": "HumanMessage", "content": "what is iran trap? acknowledge with my name.", "message_id": "2c046eb9-e4a9-478f-9d81-ebf1192dd510"},
+                    {"index": 3, "type": "AIMessage", "content": "Sure thing, Yash. I'm sorry, but I don't have information on an 'Iran trap'.", "message_id": "cecd4a9e-6b11-4b2d-8ad7-330f600a7b84"},
+                ]
+            },
+            {
+                "thread_id": "41300162-73fa-4365-aa94-de6a4a927e01",
+                "conversation": [
+                    {"index": 0, "type": "HumanMessage", "content": "this is parth", "message_id": "3e4bb05d-1c5c-4f77-b673-68d5e675dbc3"},
+                    {"index": 1, "type": "AIMessage", "content": "I'm sorry, could you provide more detail?", "message_id": "380c33f6-86d9-4d71-bc48-9afbc74e6ce9"},
+                    {"index": 2, "type": "HumanMessage", "content": "tell me about USA", "message_id": "3969687a-0d7c-4b2b-9853-ce82376fab5d"},
+                    {"index": 3, "type": "AIMessage", "content": "The United States is portrayed as having overwhelming military advantages.", "message_id": "e738793e-2fdf-4250-8fb8-5a9e17ae06d7"},
+                ]
+            }
+        ]
+    }
     
-    def close(self):
-        """Close connection pool"""
-        if self.pool:
-            self.pool.closeall()
-
-
-# ============================================================================
-# Pipeline Utilities (Backend-compatible functions for LangGraph integration)
-# ============================================================================
-
-def load_conversation(chatbot, thread_id: str) -> List:
-    """
-    Purpose: Load conversation history (messages) for a given thread from the graph's checkpointer.
-
-    Parameters:
-    - chatbot (Any): The compiled LangGraph application with checkpointer.
-    - thread_id (str): The thread ID to load.
-
-    Return Value:
-    - List[BaseMessage]: List of messages (HumanMessage, AIMessage) from the thread.
-
-    Side Effects:
-    - Reads from the checkpointer.
-
-    Examples:
-    # messages = load_conversation(chatbot, "thread-123")
-    """
+    # Initialize the conversation service
+    conversation_service = ConversationService()
+    
     try:
-        config = {"configurable": {"thread_id": thread_id}}
-        state = chatbot.get_state(config=config)
-        # Return messages if present, otherwise empty list
-        return list(state.values.get("messages", []))
-    except Exception:
-        # If thread doesn't exist or error, return empty
-        return []
+        # Open the connection pool
+        await conversation_service.open()
+        print("Connection pool opened.")
+        
+        # Process each thread
+        # for thread_data in sample_data["threads"]:
+        #     thread_id = thread_data["thread_id"]
+            
+        #     # Create the thread
+        #     thread = await conversation_service.create_thread(
+        #         metadata={"title": f"Conversation {thread_id}"}
+        #     )
+        #     print(f"\nCreated thread: {thread['thread_id']}")
+            
+        #     # Add each message to the thread
+        #     for msg in thread_data["conversation"]:
+        #         message = await conversation_service.add_thread_message(
+        #             thread_id=thread["thread_id"],
+        #             message_id=msg["message_id"],
+        #             index=msg["index"],
+        #             message_type=msg["type"],
+        #             content=msg["content"]
+        #         )
+        #         print(f"  Added [{msg['type']}] index={msg['index']}: {msg['content'][:40]}...")
+        
+        # print("\nAll messages stored successfully!")
+
+        # Get a thread
+        # thread_id = "b6ec7284-d7bb-4c97-8bb9-64dd4950cc42"
+        # thread = await conversation_service.get_thread(thread_id=thread_id)
+        # print(f"\nThread: {thread}")
+        
+        # # Get messages for the thread
+        # messages = await conversation_service.get_thread_messages(thread_id=thread_id)
+        # print(f"\nMessages ({len(messages)} total):")
+        # for msg in messages:
+        #     print(f"  [{msg['index']}] {msg['type']}: {msg['content'][:50]}...")
 
 
-def convert_messages_to_chat_history(messages: List) -> List[Dict[str, str]]:
-    """
-    Purpose: Convert LangChain messages to a simple dict format for UI rendering.
 
-    Parameters:
-    - messages (List[BaseMessage]): List of LangChain message objects.
-
-    Return Value:
-    - List[Dict[str, str]]: List of dicts with 'role' and 'content' keys.
-
-    Side Effects:
-    - None.
-
-    Examples:
-    >>> from langchain_core.messages import HumanMessage, AIMessage
-    >>> msgs = [HumanMessage(content="Hi"), AIMessage(content="Hello")]
-    >>> converted = convert_messages_to_chat_history(msgs)
-    >>> converted[0]['role']
-    'user'
-    """
-    from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk
+        # get all thread message
+        # messages = await conversation_service.list_threads()
+        # # Print each thread's messages
+        # for idx, thread_msgs in enumerate(messages, start=1):
+        #     print(f"Thread {idx} messages:")
+        #     for msg in thread_msgs:
+        #         print(msg)
     
-    chat_history = []
-    for msg in messages:
-        if isinstance(msg, AIMessageChunk):
-            continue
-        if isinstance(msg, HumanMessage):
-            role = "user"
-        elif isinstance(msg, AIMessage):
-            role = "assistant"
-        else:
-            role = "system"
-        chat_history.append({"role": role, "content": msg.content})
-    return chat_history
+    finally:
+        # Always close the connection pool
+        await conversation_service.close()
+        print("Connection pool closed.")
 
 
-def build_messages_state(
-    user_input: str,
-    base_state: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """
-    Purpose: Build a state dictionary that carries a 'messages' channel with the
-    current user input, optionally merging additional keys from an existing base state.
-
-    Parameters:
-    - user_input (str): The user's input for this turn.
-    - base_state (Optional[Dict[str, Any]]): Existing state to merge (e.g., index_dir,
-      model params). If provided, its keys are copied into the returned state.
-
-    Return Value:
-    - Dict[str, Any]: State including a 'messages' key suitable for `chatbot.stream`.
-
-    Side Effects:
-    - None.
-
-    Examples:
-    >>> s = build_messages_state("Hello")
-    >>> isinstance(s["messages"], list)
-    True
-    """
-    from langchain_core.messages import HumanMessage
-    
-    state: Dict[str, Any] = dict(base_state) if base_state else {}
-    state["messages"] = [HumanMessage(content=user_input)]
-    # Ensure compatibility with current pipeline nodes which expect 'question'
-    # for retrieval and prompt formatting.
-    state.setdefault("question", user_input)
-    return state
-
-
-def stream_ai_tokens(
-    chatbot,
-    state: Dict[str, Any],
-    thread_id: str,
-    stream_mode: str = "messages",
-):
-    """
-    Purpose: Stream only assistant (AI) message chunks' content.
-
-    Parameters:
-    - chatbot (Any): Compiled LangGraph app.
-    - state (Dict[str, Any]): Initial state for the graph.
-    - thread_id (str): Thread identifier used by the LangGraph checkpointer.
-    - stream_mode (str): Streaming mode; default 'messages'.
-
-    Return Value:
-    - Generator[str, None, None]: Yields strings representing AI message content chunks.
-
-    Side Effects:
-    - None directly; depends on graph execution.
-
-    Examples:
-    >>> # def ai_only():
-    >>> #     yield from stream_ai_tokens(chatbot, state, thread_id)
-    >>> # text = st.write_stream(ai_only())
-    """
-    from langchain_core.messages import AIMessage, AIMessageChunk
-    
-    config = {"configurable": {"thread_id": thread_id}}
-    for message_chunk, _metadata in chatbot.stream(
-        state, config=config, stream_mode=stream_mode
-    ):
-        if isinstance(message_chunk, (AIMessage, AIMessageChunk)):
-            # Yield only assistant tokens or message fragments
-            yield message_chunk.content
+# if __name__ == "__main__":
+#     # Use SelectorEventLoop for Windows compatibility with psycopg
+#     selector = selectors.SelectSelector()
+#     loop = asyncio.SelectorEventLoop(selector)
+#     asyncio.set_event_loop(loop)
+#     try:
+#         loop.run_until_complete(main())
+#     finally:
+#         loop.close()

@@ -9,12 +9,13 @@ import os
 from .models import (
     CreateThreadRequest,
     ThreadResponse,
-    AddMessageRequest,
+    AddMessage,
     MessageResponse,
-    ThreadListResponse,
-    MessagesListResponse,
-    ThreadPreviewResponse,
+    AllThreadsMessagesResponse,
+    ThreadMessagesResponse,
+    MessageModel,
     HealthCheckResponse,
+    MessagesListResponse
 )
 from .service import ConversationService
 
@@ -24,10 +25,16 @@ router = APIRouter(tags=["Conversation"])
 conversation_service = ConversationService()
 
 
+@router.on_event("startup")
+async def startup_event():
+    """Open connection pool on startup"""
+    await conversation_service.open()
+
+
 @router.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
-    conversation_service.close()
+    await conversation_service.close()
 
 
 @router.get("/health", response_model=HealthCheckResponse)
@@ -40,7 +47,7 @@ async def health_check():
 async def create_thread(request: CreateThreadRequest):
     """Create a new conversation thread"""
     try:
-        thread = conversation_service.create_thread(metadata=request.metadata)
+        thread = await conversation_service.create_thread(metadata=request.metadata)
         return ThreadResponse(**thread)
     except Exception as e:
         raise HTTPException(
@@ -48,53 +55,51 @@ async def create_thread(request: CreateThreadRequest):
             detail=f"Thread creation failed: {str(e)}",
         )
 
+ 
 
-@router.get("/api/v1/conversations/threads/{thread_id}", response_model=ThreadResponse)
-async def get_thread(thread_id: str):
-    """Get thread by ID"""
-    thread = conversation_service.get_thread(thread_id)
+@router.get("/api/v1/conversations/view-threads-with-messages", response_model=AllThreadsMessagesResponse)
+async def list_threads(limit: int=100):
+    """List all threads with messages"""
+    threads_messages = await conversation_service.list_threads(limit=limit)
+    thread_response = []
+    for thread_msgs in  threads_messages:
+        if thread_msgs:
+            thread_id  = thread_msgs[0]['thread_id']
+            messages = [MessageModel(**msg) for msg in thread_msgs]
+            thread_response.append(ThreadMessagesResponse(thread_id=thread_id, messages= messages))
+
+    return AllThreadsMessagesResponse(threads=thread_response, total=len(thread_response))
     
-    if not thread:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Thread {thread_id} not found",
-        )
+"""
+Temepory comment off
+"""
+# @router.delete("/api/v1/conversations/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
+# async def delete_thread(thread_id: str):
+#     """Delete a thread and all its messages"""
+#     success = conversation_service.delete_thread(thread_id)
     
-    return ThreadResponse(**thread)
-
-
-@router.get("/api/v1/conversations/threads", response_model=ThreadListResponse)
-async def list_threads(limit: int = 100, offset: int = 0):
-    """List all threads with pagination"""
-    threads = conversation_service.list_threads(limit=limit, offset=offset)
-    
-    return ThreadListResponse(
-        threads=[ThreadResponse(**t) for t in threads],
-        total=len(threads),
-    )
-
-
-@router.delete("/api/v1/conversations/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_thread(thread_id: str):
-    """Delete a thread and all its messages"""
-    success = conversation_service.delete_thread(thread_id)
-    
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Thread {thread_id} not found",
-        )
+#     if not success:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail=f"Thread {thread_id} not found",
+#         )
 
 
 @router.post("/api/v1/conversations/threads/{thread_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
-async def add_message(thread_id: str, request: AddMessageRequest):
+async def add_message(thread_id: str, request: AddMessage):
     """Add a message to a thread"""
+    from uuid import uuid4
+
+    # get current message
+    existing_message = await conversation_service.get_thread_messages(thread_id)
+    next_index = len(existing_message)
     try:
-        message = conversation_service.add_message(
+        message = await conversation_service.add_thread_message(
             thread_id=thread_id,
-            role=request.role,
+            message_id=str(uuid4()),
+            index=next_index,
+            message_type=request.type,  
             content=request.content,
-            metadata=request.metadata,
         )
         return MessageResponse(**message)
     except Exception as e:
@@ -105,10 +110,10 @@ async def add_message(thread_id: str, request: AddMessageRequest):
 
 
 @router.get("/api/v1/conversations/threads/{thread_id}/messages", response_model=MessagesListResponse)
-async def get_messages(thread_id: str):
+async def get_thread_messages(thread_id: str):
     """Get all messages for a thread"""
     try:
-        messages = conversation_service.get_messages(thread_id)
+        messages = await conversation_service.get_thread_messages(thread_id)
         
         return MessagesListResponse(
             messages=[MessageResponse(**m) for m in messages],
@@ -122,14 +127,4 @@ async def get_messages(thread_id: str):
         )
 
 
-@router.get("/api/v1/conversations/threads/{thread_id}/preview", response_model=ThreadPreviewResponse)
-async def get_thread_preview(thread_id: str, max_length: int = 50):
-    """Get a preview of a thread"""
-    try:
-        preview = conversation_service.get_thread_preview(thread_id, max_length)
-        return ThreadPreviewResponse(**preview)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get preview: {str(e)}",
-        )
+ 

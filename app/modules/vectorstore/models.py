@@ -33,6 +33,7 @@ class CreateIndexResponse(BaseModel):
     success: bool
     index_name: str
     message: str
+    created_at: datetime = Field(default_factory=datetime.now)  
 
 
 class IndexInfo(BaseModel):
@@ -59,7 +60,7 @@ class HealthCheckResponse(BaseModel):
     """Health check response"""
     status: str
     service: str = "vectorstore_service"
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=datetime.now)
 
 
 # Utility function models for Supabase operations
