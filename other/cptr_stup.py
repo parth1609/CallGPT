@@ -1,4 +1,3 @@
-
 import os
 import sqlite3
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -6,7 +5,7 @@ from backend import _pipeline as pipeline
 from backend.conversation import thread_manager
 
 # Setup checkpointer
-db_path = os.path.join('db', 'chatbot.db')
+db_path = os.path.join("db", "chatbot.db")
 os.makedirs(os.path.dirname(db_path), exist_ok=True)
 conn = sqlite3.connect(database=db_path, check_same_thread=False)
 checkpointer = SqliteSaver(conn=conn)
@@ -17,7 +16,7 @@ chatbot = pipeline.build_rag_graph(checkpointer=checkpointer)
 # Get all threads
 all_threads = set()
 for checkpoint in checkpointer.list(None):
-    all_threads.add(checkpoint.config['configurable']['thread_id'])
+    all_threads.add(checkpoint.config["configurable"]["thread_id"])
 
 print("All thread IDs:", list(all_threads))
 print(checkpointer.setup())

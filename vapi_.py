@@ -2,7 +2,7 @@ import os
 from vapi import Vapi, CreateByoPhoneNumberDto
 from vapi.core.api_error import ApiError
 
-VAPI_API_TOKEN = '02ed50e1-8433-4ac9-ae19-c488fc839899'
+VAPI_API_TOKEN = "02ed50e1-8433-4ac9-ae19-c488fc839899"
 
 # Instantiate the Vapi client with your API token
 # For security, load your token from an environment variable
@@ -13,17 +13,20 @@ except Exception as e:
     print("Please ensure your VAPI_API_TOKEN environment variable is set.")
     exit()
 
+
 def make_vapi_call(assistant_id: str, phone_number_id: str, customer_number: str):
     """
     Initiates an outbound call using the Vapi API.
     """
     try:
         # Debug context to help diagnose issues like international calling restrictions
-        print(f"Creating call with assistant_id={assistant_id}, phone_number_id={phone_number_id}, customer={customer_number}")
+        print(
+            f"Creating call with assistant_id={assistant_id}, phone_number_id={phone_number_id}, customer={customer_number}"
+        )
         response = client.calls.create(
             assistant_id=assistant_id,
             phone_number_id=phone_number_id,
-            customer={"number": customer_number}
+            customer={"number": customer_number},
         )
         print("Call initiated successfully.")
         print(f"Call ID: {response.id}")
@@ -37,7 +40,13 @@ def make_vapi_call(assistant_id: str, phone_number_id: str, customer_number: str
         print(f"Failed to create call: {e}")
         return None
 
-def create_byo_phone_number(credential_id: str, name: str | None = None, assistant_id: str | None = None, number: str | None = None):
+
+def create_byo_phone_number(
+    credential_id: str,
+    name: str | None = None,
+    assistant_id: str | None = None,
+    number: str | None = None,
+):
     """
     Create a BYO (bring-your-own) phone number in Vapi.
 
@@ -63,10 +72,11 @@ def create_byo_phone_number(credential_id: str, name: str | None = None, assista
         print(f"Failed to create BYO phone number: {e}")
     return None
 
+
 if __name__ == "__main__":
     # Replace these placeholders with your actual IDs and number
-    YOUR_ASSISTANT_ID = 'c4c26995-887d-486f-99ff-3dc53a73aad'
-    YOUR_PHONE_NUMBER_ID = '5739c5fc-d3f8-408e-b022-893f6632980'
+    YOUR_ASSISTANT_ID = "c4c26995-887d-486f-99ff-3dc53a73aad"
+    YOUR_PHONE_NUMBER_ID = "5739c5fc-d3f8-408e-b022-893f6632980"
     CUSTOMER_PHONE_NUMBER = "+1"  # Use E.164 format
 
     # Check that the environment variable for the token is set
@@ -86,4 +96,3 @@ if __name__ == "__main__":
                 assistant_id=os.getenv("VAPI_DEFAULT_ASSISTANT_ID"),
                 number=os.getenv("VAPI_DID"),
             )
- 

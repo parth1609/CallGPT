@@ -28,15 +28,22 @@ app.add_middleware(
 app.include_router(embedding_router, prefix="/api/v1/embeddings", tags=["Embeddings"])
 app.include_router(retrieval_router, prefix="/api/v1/retrieval", tags=["Retrieval"])
 app.include_router(llm_router, prefix="/api/v1/llm", tags=["LLM"])
-app.include_router(conversation_router, prefix="/api/v1/conversations", tags=["Conversation"])
+app.include_router(
+    conversation_router, prefix="/api/v1/conversations", tags=["Conversation"]
+)
 app.include_router(document_router, prefix="/api/v1/documents", tags=["Documents"])
-app.include_router(vectorstore_router, prefix="/api/v1/vectorstore", tags=["VectorStore"])
+app.include_router(
+    vectorstore_router, prefix="/api/v1/vectorstore", tags=["VectorStore"]
+)
 app.include_router(pipeline_router, prefix="/api/v1/pipeline", tags=["Pipeline"])
+
 
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "version": settings.APP_VERSION}
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

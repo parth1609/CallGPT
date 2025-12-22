@@ -1,4 +1,5 @@
 from toon import encode
+
 data = {
     "metadata": {"version": 1, "author": "test"},
     "items": [

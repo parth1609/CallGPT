@@ -1,0 +1,132 @@
+[
+  {
+    "type": "StateSnapshot",
+    "values": {
+      "table_name": "documents",
+      "query_name": "match_documents",
+      "rebuild": false,
+      "bucket_name": "openai-bucket",
+      "chunks": [],
+      "embeddings_model": "sentence-transformers/all-MiniLM-L6-v2",
+      "temperature": 0.5,
+      "question": "ok thanks",
+      "search_type": "similarity_search",
+      "k": 4,
+      "fetch_k": 20,
+      "lambda_mult": 0.5,
+      "use_reranker": false,
+      "reranker_model": "bge-reranker-v2-m3",
+      "messages": [
+        {
+          "type": "HumanMessage",
+          "content": "give me the summary of the assignment",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "id": "a5a80de1-22ff-4e67-96f6-8b686203b3b9"
+        },
+        {
+          "type": "HumanMessage",
+          "content": "give me the summary of the assignment\n\n",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "id": "693759b4-9afa-498e-a97c-ee1f0051dcd6"
+        },
+        {
+          "type": "HumanMessage",
+          "content": "Chat failed: Error code: 400 - {'error': {'message': \"'messages.0' : discriminator property 'role' has invalid value\", 'type': 'invalid_request_error'}}",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "id": "9cbe7745-9bab-49cf-9024-89659328a80e"
+        },
+        {
+          "type": "AIMessage",
+          "content": "I’m happy to help, but I don’t have any details about the assignment you’re referring to. Could you please provide the assignment description or the key points you’d like summarized? Once I have that information, I can give you a concise summary.",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "id": "8a36da5e-05cb-4af7-9f80-3634a8973657"
+        },
+        {
+          "type": "HumanMessage",
+          "content": "the data ingestion assgiment",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "id": "100bad51-801b-4149-ae93-d794b241e60b"
+        },
+        {
+          "type": "AIMessage",
+          "content": "I’m sorry—I don’t have enough information about the ‘data ingestion assignment’ to provide a summary. Could you please share the assignment description or the key points you’d like summarized? Once I have those details, I’ll be able to give you a concise summary.",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "id": "df437385-1462-46b2-8c36-07c311c6231a"
+        },
+        {
+          "type": "HumanMessage",
+          "content": "give me summary of all the content that you have",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "id": "6c2486dc-62dd-4c92-90b2-6af01b787146"
+        },
+        {
+          "type": "AIMessage",
+          "content": "I’m happy to help, but I don’t have a single, specific document titled ‘all the content that you have.’ My knowledge comes from a broad range of sources that were used to train the model, and I can’t provide a concise summary of that entire dataset.\n\nIf you can let me know what specific topic, document, or set of materials you’d like summarized—e.g., a particular article, a project brief, a set of lecture notes, or any other piece of content—I can create a clear, focused summary for you. Just share the details, and I’ll get right on it!",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "id": "df8c0a3c-1c5a-4714-9324-7898825c7e8a"
+        },
+        {
+          "type": "HumanMessage",
+          "content": "The topic is 'Query Handling'.",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "id": "5476e9a6-7dcc-4d21-9fd7-180fb87bfdce"
+        },
+        {
+          "type": "AIMessage",
+          "content": "I’m sorry—I can’t generate an answer because no contextual information was provided. Could you please share the relevant passage or details about ‘Query Handling’ that you’d like me to use? Once I have that context, I’ll be able to answer your question.",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "id": "ae5433ee-68b4-4f74-9329-940b53bbb575"
+        },
+        {
+          "type": "HumanMessage",
+          "content": "ok thanks",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "id": "703ef1a3-190a-4686-b365-addcc15f857e"
+        },
+        {
+          "type": "AIMessage",
+          "content": "You’re very welcome! If there’s anything else you need, just let me know.",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "id": "bf78a974-ad03-4da4-960e-15af4a8068a1"
+        }
+      ],
+      "thread_id": "1f3b73fe1d0e445dab8f0054e859df81",
+      "answer": "You’re very welcome! If there’s anything else you need, just let me know."
+    },
+    "next": [],
+    "config": {
+      "configurable": {
+        "thread_id": "1f3b73fe1d0e445dab8f0054e859df81",
+        "checkpoint_ns": "",
+        "checkpoint_id": "1f0dda17-cb12-6030-802d-7f3d4f827f86"
+      }
+    },
+    "metadata": {
+      "source": "loop",
+      "step": 45,
+      "parents": {}
+    },
+    "created_at": "2025-12-20T12:43:29.994126+00:00",
+    "parent_config": {
+      "configurable": {
+        "thread_id": "1f3b73fe1d0e445dab8f0054e859df81",
+        "checkpoint_ns": "",
+        "checkpoint_id": "1f0dda17-660c-69d0-802c-a0c74e005f6b"
+      }
+    },
+    "tasks": [],
+    "interrupts": []
+  }
+]

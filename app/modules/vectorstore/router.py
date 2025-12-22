@@ -57,7 +57,6 @@ async def create_index(request: CreateIndexRequest):
         result = vectorstore_service.create_index(
             index_name=request.index_name,
             dimension=request.dimension,
-
         )
         return CreateIndexResponse(**result)
     except Exception as e:
@@ -91,31 +90,34 @@ async def get_index_stats(index_name: str):
 # Utility Endpoints - Supabase Vector Store (Backend-compatible functions)
 # ============================================================================
 
-@router.post("/api/v1/vectorstore/utils/supabase/build", response_model=BuildSupabaseResponse)
+
+@router.post(
+    "/api/v1/vectorstore/utils/supabase/build", response_model=BuildSupabaseResponse
+)
 async def build_supabase_vectorstore(request: BuildSupabaseRequest):
     """
     Build Supabase vector store from text chunks using pipeline utility.
-    
+
     This endpoint exposes build_supabase_from_documents() for testing and
     frontend access before using in the pipeline.
-    
+
     Parameters:
     - request (BuildSupabaseRequest): Chunks and configuration
-    
+
     Return Value:
     - BuildSupabaseResponse: Build result
     """
     from .service import build_supabase_from_documents
     from app.modules.embedding.service import get_embedding_model
     from langchain_core.documents import Document
-    
+
     try:
         # Get embedding model
         emb = get_embedding_model(request.embedding_model)
-        
+
         # Create document objects from chunks
         docs = [Document(page_content=chunk, metadata={}) for chunk in request.chunks]
-        
+
         # Build Supabase vector store
         table_name = build_supabase_from_documents(
             docs=docs,
@@ -123,7 +125,7 @@ async def build_supabase_vectorstore(request: BuildSupabaseRequest):
             table_name=request.table_name,
             query_name=request.query_name,
         )
-        
+
         return BuildSupabaseResponse(
             success=True,
             table_name=table_name,
@@ -134,4 +136,3 @@ async def build_supabase_vectorstore(request: BuildSupabaseRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Supabase build failed: {str(e)}",
         )
-

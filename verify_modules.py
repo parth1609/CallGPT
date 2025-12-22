@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 # Add project root to path
 sys.path.append(os.getcwd())
 
+
 def check_import(module_name):
     try:
         __import__(module_name)
@@ -17,10 +18,11 @@ def check_import(module_name):
         print(f"❌ Error importing {module_name}: {e}")
         return False
 
+
 def verify_services():
     print("\n--- Verifying Service Initialization ---")
     load_dotenv()
-    
+
     services = [
         ("app.modules.embedding.service", "EmbeddingService"),
         ("app.modules.retrieval.service", "RetrievalService"),
@@ -29,7 +31,7 @@ def verify_services():
         ("app.modules.document.service", "DocumentService"),
         ("app.modules.vectorstore.service", "VectorStoreService"),
     ]
-    
+
     for module_path, class_name in services:
         try:
             module = __import__(module_path, fromlist=[class_name])
@@ -43,6 +45,7 @@ def verify_services():
         except Exception as e:
             print(f"❌ Failed to load module for {class_name}: {e}")
 
+
 if __name__ == "__main__":
     print("--- Checking Imports ---")
     modules_to_check = [
@@ -55,12 +58,12 @@ if __name__ == "__main__":
         "app.modules.document.router",
         "app.modules.vectorstore.router",
     ]
-    
+
     all_passed = True
     for mod in modules_to_check:
         if not check_import(mod):
             all_passed = False
-            
+
     if all_passed:
         verify_services()
     else:

@@ -31,7 +31,7 @@ embedding_service = EmbeddingService()
 async def health_check():
     """
     Health check endpoint to verify service availability.
-    
+
     Return Value:
     - HealthCheckResponse: Service status and timestamp
     """
@@ -46,10 +46,10 @@ async def health_check():
 async def chunk_text(request: ChunkRequest):
     """
     Chunk text into smaller segments.
-    
+
     Parameters:
     - request (ChunkRequest): Text and chunking parameters
-    
+
     Return Value:
     - ChunkResponse: List of text chunks
     """
@@ -59,7 +59,7 @@ async def chunk_text(request: ChunkRequest):
             chunk_size=request.chunk_size,
             chunk_overlap=request.chunk_overlap,
         )
-        
+
         return ChunkResponse(
             chunks=chunks,
             total_chunks=len(chunks),
@@ -75,10 +75,10 @@ async def chunk_text(request: ChunkRequest):
 async def generate_embeddings(request: EmbeddingRequest):
     """
     Generate embeddings for a list of texts.
-    
+
     Parameters:
     - request (EmbeddingRequest): Texts and model name
-    
+
     Return Value:
     - EmbeddingResponse: Embedding vectors and metadata
     """
@@ -87,7 +87,7 @@ async def generate_embeddings(request: EmbeddingRequest):
             texts=request.texts,
             model_name=request.model_name,
         )
-        
+
         return EmbeddingResponse(
             embeddings=embeddings,
             model_name=model_name,
@@ -104,24 +104,26 @@ async def generate_embeddings(request: EmbeddingRequest):
 async def chunk_and_embed(request: ChunkAndEmbedRequest):
     """
     Chunk text and generate embeddings in one operation.
-    
+
     Parameters:
     - request (ChunkAndEmbedRequest): Text, chunking, and embedding parameters
-    
+
     Return Value:
     - ChunkAndEmbedResponse: Chunks and their embeddings
-    
+
     Side Effects:
     - Loads embedding model (cached)
     """
     try:
-        chunks, embeddings, model_name, total_chunks = embedding_service.chunk_and_embed(
-            text=request.text,
-            chunk_size=request.chunk_size,
-            chunk_overlap=request.chunk_overlap,
-            model_name=request.model_name,
+        chunks, embeddings, model_name, total_chunks = (
+            embedding_service.chunk_and_embed(
+                text=request.text,
+                chunk_size=request.chunk_size,
+                chunk_overlap=request.chunk_overlap,
+                model_name=request.model_name,
+            )
         )
-        
+
         return ChunkAndEmbedResponse(
             chunks=chunks,
             embeddings=embeddings,
@@ -139,12 +141,10 @@ async def chunk_and_embed(request: ChunkAndEmbedRequest):
 async def list_models():
     """
     Get list of available embedding models.
-    
+
     Return Value:
     - ModelsListResponse: List of available models with metadata
     """
     models = embedding_service.get_available_models()
-    
-    return ModelsListResponse(
-        models=[ModelInfo(**model) for model in models]
-    )
+
+    return ModelsListResponse(models=[ModelInfo(**model) for model in models])

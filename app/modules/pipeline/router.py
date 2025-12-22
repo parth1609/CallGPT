@@ -27,11 +27,12 @@ pipeline_service = PipelineService()
 # Health Check Endpoint
 # ============================================================================
 
+
 @router.get("/health", response_model=HealthCheckResponse)
 async def health_check():
     """
     Health check endpoint for pipeline service.
-    
+
     Return Value:
     - HealthCheckResponse: Service status and timestamp
     """
@@ -46,24 +47,25 @@ async def health_check():
 # Organisation Pipeline Endpoints
 # ============================================================================
 
+
 @router.post(
     "/organisations/upload",
     response_model=OrganisationUploadResponse,
-    status_code=status.HTTP_201_CREATED
+    status_code=status.HTTP_201_CREATED,
 )
 async def upload_organisation_document_json(request: OrganisationUploadRequest):
     """
     Upload and process organisation document through LangGraph pipeline (JSON).
-    
+
     Pipeline Flow:
     START → document_load → embedding → vectorstore → END
-    
+
     Parameters:
     - request: OrganisationUploadRequest with document data
-    
+
     Return Value:
     - OrganisationUploadResponse: Processing result with chunk count
-    
+
     Side Effects:
     - Uploads document to Supabase storage
     - Generates embeddings
@@ -80,7 +82,7 @@ async def upload_organisation_document_json(request: OrganisationUploadRequest):
             chunk_overlap=request.chunk_overlap,
             metadata=request.metadata,
         )
-        
+
         return OrganisationUploadResponse(
             status="success",
             message="Document processed successfully through pipeline",
@@ -89,23 +91,20 @@ async def upload_organisation_document_json(request: OrganisationUploadRequest):
             chunks_created=len(result.get("chunks", [])),
             metadata=result.get("metadata"),
         )
-    
+
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Pipeline processing failed: {str(e)}"
+            detail=f"Pipeline processing failed: {str(e)}",
         )
 
 
 @router.post(
     "/organisations/upload-file",
     response_model=OrganisationUploadResponse,
-    status_code=status.HTTP_201_CREATED
+    status_code=status.HTTP_201_CREATED,
 )
 async def upload_organisation_document_file(
     file: UploadFile = File(...),
@@ -116,20 +115,20 @@ async def upload_organisation_document_file(
 ):
     """
     Upload and process organisation document through LangGraph pipeline (File Upload).
-    
+
     Pipeline Flow:
     START → document_load → embedding → vectorstore → END
-    
+
     Parameters:
     - file: Uploaded file (multipart/form-data)
     - bucket_name: Supabase bucket and Pinecone index name
     - embeddings_model: Model to use for embeddings
     - chunk_size: Size of text chunks
     - chunk_overlap: Overlap between chunks
-    
+
     Return Value:
     - OrganisationUploadResponse: Processing result with chunk count
-    
+
     Side Effects:
     - Uploads document to Supabase storage
     - Generates embeddings
@@ -139,7 +138,7 @@ async def upload_organisation_document_file(
         # Read uploaded file content
         content = await file.read()
         text_content = content.decode("utf-8", errors="ignore")
-        
+
         # Process through service layer
         result = pipeline_service.process_organisation_document(
             filename=file.filename,
@@ -149,7 +148,7 @@ async def upload_organisation_document_file(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
         )
-        
+
         return OrganisationUploadResponse(
             status="success",
             message="Document processed successfully through pipeline",
@@ -158,16 +157,13 @@ async def upload_organisation_document_file(
             chunks_created=len(result.get("chunks", [])),
             metadata=result.get("metadata"),
         )
-    
+
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Pipeline processing failed: {str(e)}"
+            detail=f"Pipeline processing failed: {str(e)}",
         )
 
 
@@ -175,24 +171,25 @@ async def upload_organisation_document_file(
 # Customer Query Pipeline Endpoints
 # ============================================================================
 
+
 @router.post(
     "/customer/query",
     response_model=CustomerQueryResponse,
-    status_code=status.HTTP_200_OK
+    status_code=status.HTTP_200_OK,
 )
 async def query_documents(request: CustomerQueryRequest):
     """
     Query documents through customer pipeline (synchronous).
-    
+
     Pipeline Flow:
     START → vectorstore → answer → save_conversation → END
-    
+
     Parameters:
     - request: CustomerQueryRequest with query parameters
-    
+
     Return Value:
     - CustomerQueryResponse: Answer and metadata
-    
+
     Side Effects:
     - Queries Pinecone vector store
     - Generates LLM response
@@ -212,21 +209,17 @@ async def query_documents(request: CustomerQueryRequest):
             lambda_mult=request.lambda_mult,
             thread_id=request.thread_id,
         )
-        
+
         return CustomerQueryResponse(
             answer=result.get("answer", ""),
             question=request.question,
             thread_id=result.get("thread_id"),
         )
-    
+
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Query processing failed: {str(e)}"
+            detail=f"Query processing failed: {str(e)}",
         )
-

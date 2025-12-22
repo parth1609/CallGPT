@@ -30,7 +30,7 @@ doc_service = DocumentService()
 async def health_check():
     """
     Health check endpoint to verify service availability.
-    
+
     Return Value:
     - HealthCheckResponse: Service status and timestamp
     """
@@ -41,17 +41,21 @@ async def health_check():
     )
 
 
-@router.post("/api/v1/documents/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/api/v1/documents/upload",
+    response_model=DocumentUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def upload_document(request: DocumentUploadRequest):
     """
     Upload a document to storage.
-    
+
     Parameters:
     - request (DocumentUploadRequest): Document upload request with filename, content, and metadata
-    
+
     Return Value:
     - DocumentUploadResponse: Upload result with document ID and metadata
-    
+
     Side Effects:
     - Uploads file to Supabase Storage
     - Stores metadata in database
@@ -73,18 +77,18 @@ async def upload_document(request: DocumentUploadRequest):
 @router.post(
     "/api/v1/documents/upload-file",
     response_model=DocumentUploadResponse,
-    status_code=status.HTTP_201_CREATED
+    status_code=status.HTTP_201_CREATED,
 )
 async def upload_file(file: UploadFile = File(...)):
     """
     Upload a file directly (multipart/form-data).
-    
+
     Parameters:
     - file (UploadFile): File uploaded via multipart form
-    
+
     Return Value:
     - DocumentUploadResponse: Upload result with document ID and metadata
-    
+
     Side Effects:
     - Reads file content
     - Uploads to Supabase Storage
@@ -92,11 +96,14 @@ async def upload_file(file: UploadFile = File(...)):
     try:
         content = await file.read()
         text_content = content.decode("utf-8", errors="ignore")
-        
+
         result = doc_service.upload_document(
             filename=file.filename,
             content=text_content,
-            metadata={"original_filename": file.filename, "content_type": file.content_type},
+            metadata={
+                "original_filename": file.filename,
+                "content_type": file.content_type,
+            },
         )
         return DocumentUploadResponse(**result)
         # return Document(page_content=text_content,metadata=result['metadata'])
@@ -111,25 +118,29 @@ async def upload_file(file: UploadFile = File(...)):
 async def get_document(document_id: str):
     """
     Retrieve document content by ID.
-    
+
     Parameters:
     - document_id (str): Unique document identifier
-    
+
     Return Value:
     - DocumentContentResponse: Document content and metadata
     """
     content = doc_service.get_document_content(document_id)
     metadata = doc_service.get_document_metadata(document_id)
-    
+
     if not content:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Document {document_id} not found",
         )
-    
+
     # Derive filename if metadata is missing
-    derived_filename = document_id.split("_", 1)[1] if "_" in document_id else (metadata.get("filename") if metadata else "unknown")
-    
+    derived_filename = (
+        document_id.split("_", 1)[1]
+        if "_" in document_id
+        else (metadata.get("filename") if metadata else "unknown")
+    )
+
     return DocumentContentResponse(
         document_id=document_id,
         filename=derived_filename,
@@ -137,25 +148,27 @@ async def get_document(document_id: str):
     )
 
 
-@router.get("/api/v1/documents/{document_id}/metadata", response_model=DocumentMetadataResponse)
+@router.get(
+    "/api/v1/documents/{document_id}/metadata", response_model=DocumentMetadataResponse
+)
 async def get_document_metadata(document_id: str):
     """
     Retrieve document metadata by ID.
-    
+
     Parameters:
     - document_id (str): Unique document identifier
-    
+
     Return Value:
     - DocumentMetadataResponse: Document metadata
     """
     metadata = doc_service.get_document_metadata(document_id)
-    
+
     if not metadata:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Document {document_id} not found",
         )
-    
+
     return DocumentMetadataResponse(**metadata)
 
 
@@ -163,36 +176,38 @@ async def get_document_metadata(document_id: str):
 async def list_documents(limit: int = 100, offset: int = 0):
     """
     List all documents with pagination.
-    
+
     Parameters:
     - limit (int): Maximum number of documents to return (default: 100)
     - offset (int): Number of documents to skip (default: 0)
-    
+
     Return Value:
     - DocumentListResponse: List of documents and total count
     """
     documents = doc_service.list_documents(limit=limit, offset=offset)
-    
+
     return DocumentListResponse(
         documents=[DocumentMetadataResponse(**doc) for doc in documents],
         total=len(documents),
     )
 
 
-@router.delete("/api/v1/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/api/v1/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 async def delete_document(document_id: str):
     """
     Delete a document by ID.
-    
+
     Parameters:
     - document_id (str): Unique document identifier
-    
+
     Side Effects:
     - Removes file from storage
     - Deletes metadata from database
     """
     success = doc_service.delete_document(document_id)
-    
+
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -204,37 +219,38 @@ async def delete_document(document_id: str):
 # Utility Endpoints (Backend-compatible functions exposed as API)
 # ============================================================================
 
+
 @router.post("/api/v1/documents/utils/chunk", response_model=ChunkDocumentsResponse)
 async def chunk_document_text(request: ChunkDocumentsRequest):
     """
     Chunk text into smaller segments using the pipeline utility function.
-    
+
     This endpoint exposes the chunk_documents() utility function for testing
     and frontend access before using in the pipeline.
-    
+
     Parameters:
     - request (ChunkDocumentsRequest): Text and chunking parameters
-    
+
     Return Value:
     - ChunkDocumentsResponse: List of chunks
     """
     from .service import chunk_documents
     from langchain_core.documents import Document
-    
+
     try:
         # Create a temporary document object
         doc = Document(page_content=request.content, metadata={})
-        
+
         # Use the utility function
         chunks = chunk_documents(
             docs=[doc],
             chunk_size=request.chunk_size,
             chunk_overlap=request.chunk_overlap,
         )
-        
+
         # Extract text from chunked documents
         chunk_texts = [chunk.page_content for chunk in chunks]
-        
+
         return ChunkDocumentsResponse(
             chunks=chunk_texts,
             total_chunks=len(chunk_texts),
@@ -244,4 +260,3 @@ async def chunk_document_text(request: ChunkDocumentsRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chunking failed: {str(e)}",
         )
-

@@ -36,14 +36,14 @@ async def chat_completion(request: ChatRequest):
     """Generate chat completion"""
     try:
         messages = [{"role": m.role, "content": m.content} for m in request.messages]
-        
+
         result = llm_service.chat(
             messages=messages,
             model=request.model,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
         )
-        
+
         return ChatResponse(
             message=Message(**result["message"]),
             model=result["model"],
@@ -61,7 +61,7 @@ async def stream_chat_completion(request: ChatRequest):
     """Stream chat completion"""
     try:
         messages = [{"role": m.role, "content": m.content} for m in request.messages]
-        
+
         def generate():
             for chunk in llm_service.stream_chat(
                 messages=messages,
@@ -70,7 +70,7 @@ async def stream_chat_completion(request: ChatRequest):
                 max_tokens=request.max_tokens,
             ):
                 yield f"data: {json.dumps(chunk)}\n\n"
-        
+
         return StreamingResponse(
             generate(),
             media_type="text/event-stream",
@@ -86,6 +86,4 @@ async def stream_chat_completion(request: ChatRequest):
 async def list_models():
     """Get list of available models"""
     models = llm_service.get_available_models()
-    return ModelsListResponse(
-        models=[ModelInfo(**m) for m in models]
-    )
+    return ModelsListResponse(models=[ModelInfo(**m) for m in models])
