@@ -36,12 +36,72 @@ from langgraph.checkpoint.postgres import PostgresSaver
 load_dotenv()
 
 # Global variables for checkpointer and thread tracking
-# checkpointer can be None or initialized with PostgresSaver/SqliteSaver
-checkpointer = None
+# Initialize PostgreSQL checkpointer for conversation persistence
+DB_URI = os.getenv("DATABASE_URL")
+
+if DB_URI:
+    try:
+        # Fix for "prepared statement already exists" error
+        # We need to create a connection pool with prepare_threshold=None to disable prepared statements
+        # This is necessary when using PostgresSaver to avoid conflicts
+        from psycopg_pool import ConnectionPool
+        
+        # Create connection pool with prepare_threshold=None to disable prepared statements
+        pool = ConnectionPool(
+            conninfo=DB_URI,
+            max_size=10,
+            kwargs={
+                "autocommit": True,
+                "prepare_threshold": None,  # Disable prepared statements to avoid conflicts
+            },
+            open=True
+        )
+        
+        # Create PostgresSaver with the connection pool
+        checkpointer = PostgresSaver(pool)
+        checkpointer.setup()  # Initialize the required database tables
+        logger.info("✅ PostgreSQL checkpointer initialized successfully (prepared statements disabled)")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to initialize PostgreSQL checkpointer: {e}")
+        logger.warning("Conversations will not be persisted to database")
+        checkpointer = None
+else:
+    logger.warning("⚠️ DATABASE_URL not found. Checkpointer disabled.")
+    logger.warning("Set DATABASE_URL in .env to enable conversation persistence")
+    checkpointer = None
 
 # Thread-specific storage for retrievers and metadata
 _THREAD_RETRIEVERS = {}
 _THREAD_METADATA = {}
+
+
+def get_thread_history(thread_id: str, db_uri: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Retrieve the full conversation history for a specific thread from PostgreSQL checkpointer.
+    
+    This is a convenience wrapper around ConversationService.get_thread_history that uses
+    the global checkpointer instance.
+    
+    Parameters:
+    - thread_id: The specific thread ID to retrieve history for
+    - db_uri: PostgreSQL connection string (defaults to DATABASE_URL env variable)
+    
+    Returns:
+    - List of message dictionaries with 'type' and 'content' keys
+    
+    Example:
+        messages = get_thread_history("your_thread_id")
+        for msg in messages:
+            print(f"{msg['type']}: {msg['content']}")
+    """
+    from app.modules.conversation.service import ConversationService
+    
+    # Use global checkpointer if available and no custom db_uri provided
+    if checkpointer is not None and db_uri is None:
+        return ConversationService.get_thread_history(thread_id, checkpointer_instance=checkpointer)
+    else:
+        return ConversationService.get_thread_history(thread_id, db_uri=db_uri)
+
 
 
 class RAGState(TypedDict, total=False):
@@ -88,46 +148,6 @@ class RAGState(TypedDict, total=False):
 
     answer: str
 
-
-# Utilities
-def generate_thread_id() -> str:
-    return str(uuid.uuid4())
-
-
-def load_conversation(graph, thread_id: str) -> list[BaseMessage]:
-    """
-    Load conversation history from a graph's checkpointer.
-
-    Parameters:
-    - graph: The compiled LangGraph application with checkpointer
-    - thread_id: The thread ID to load messages from
-
-    Returns:
-    - List of BaseMessage objects from the conversation history
-    """
-    try:
-        config = {"configurable": {"thread_id": thread_id}}
-        graph_state = graph.get_state(config)
-        if graph_state and graph_state.values:
-            return list(graph_state.values.get("messages", []))
-    except Exception:
-        pass
-    return []
-
-
-def retrieve_all_threads():
-    all_threads = set()
-    for checkpoint in checkpointer.list(None):
-        all_threads.add(checkpoint.config["configurable"]["thread_id"])
-    return list(all_threads)
-
-
-def thread_has_document(state: RAGState) -> bool:
-    return str(state.get("thread_id")) in _THREAD_RETRIEVERS
-
-
-def thread_document_metadata(state: RAGState) -> dict:
-    return _THREAD_METADATA.get(str(state.get("thread_id")), {})
 
 
 #  LangGraph Nodes
@@ -446,6 +466,7 @@ def node_answer(state: RAGState):
     yield final_output
 
 
+
 # Organisaton graph
 """
 Graph Flow:
@@ -473,11 +494,11 @@ customer_pipeline = StateGraph(RAGState)
 
 # Add nodes
 customer_pipeline.add_node("answer", node_answer)
-customer_pipeline.add_node("save_conversation", node_save_conversation)
+# customer_pipeline.add_node("save_conversation", node_save_conversation)
 
 # Build flow
 customer_pipeline.add_edge(START, "answer")
-customer_pipeline.add_edge("answer", "save_conversation")
-customer_pipeline.add_edge("save_conversation", END)
+customer_pipeline.add_edge("answer", END)
+# customer_pipeline.add_edge("save_conversation", END)
 
 customer = customer_pipeline.compile(checkpointer=checkpointer)

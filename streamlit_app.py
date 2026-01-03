@@ -4,12 +4,14 @@ import tempfile
 import streamlit as st
 import requests
 from dotenv import load_dotenv
-
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage, FunctionMessage
+import logging as logger
 load_dotenv(override=False)
 
 # API Configuration
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
+project_root = Path(__file__).parent.parent 
 from app.modules.pipeline.pipeline import customer
 
 st.set_page_config(page_title="CallGPT", page_icon="💬", layout="wide")
@@ -35,17 +37,46 @@ st.markdown('<p class="medium-font">Enterprise RAG System</p>', unsafe_allow_htm
 
 st.divider()
 
+ 
 
-# def load_conversation(graph, thread_id: str) -> list[BaseMessage]:
+# Utilities
 
-#     try:
-#         config = {"configurable": {"thread_id": thread_id}}
-#         state = graph.get_state(config)
-#         if state and state.values:
-#             return state.values.get("messages", [])
-#     except Exception:
-#         pass
-#     return []
+
+def load_conversation(graph, thread_id: str) -> list[BaseMessage]:
+    """
+    Load conversation history from a graph's checkpointer.
+
+    Parameters:
+    - graph: The compiled LangGraph application with checkpointer
+    - thread_id: The thread ID to load messages from
+
+    Returns:
+    - List of BaseMessage objects from the conversation history
+    """
+    try:
+        config = {"configurable": {"thread_id": thread_id}}
+        graph_state = graph.get_state(config)
+        if graph_state and graph_state.values:
+            return list(graph_state.values.get("messages", []))
+    except Exception:
+        pass
+    return []
+
+
+def retrieve_all_threads():
+    all_threads = set()
+    for checkpoint in checkpointer.list(None):
+        all_threads.add(checkpoint.config["configurable"]["thread_id"])
+    return list(all_threads)
+
+
+def thread_has_document(thread_id) -> bool:
+    return str(thread_id) in _THREAD_RETRIEVERS
+
+
+def thread_document_metadata(thread_id) -> dict:
+    return _THREAD_METADATA.get(str(thread_id), {})
+
 
 
 def render_org():
@@ -174,15 +205,44 @@ def render_customer():
     st.subheader("💬 Customer Chat")
     st.caption("Ask questions about your indexed documents")
 
-    # Import customer pipeline from pipeline.py
-    from app.modules.pipeline.pipeline import customer
+    # Import customer pipeline and get_thread_history from pipeline.py
+    from app.modules.pipeline.pipeline import customer, get_thread_history
+
+    # Initialize customer graph in session state
+    if "customer" not in st.session_state:
+        st.session_state.customer = customer
 
     # Initialize thread_id if not present
     if "thread_id" not in st.session_state:
         st.session_state.thread_id = str(uuid.uuid4())
 
+    # Initialize chat_history if not present
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
+    
+    # Flag to track if we've loaded history for this thread
+    if "history_loaded_for_thread" not in st.session_state:
+        st.session_state.history_loaded_for_thread = None
+    
+    # Load conversation history from database if not already loaded for this thread
+    if st.session_state.history_loaded_for_thread != st.session_state.thread_id:
+        try:
+            # Try to load previous messages from database
+            messages = get_thread_history(st.session_state.thread_id, )
+            if messages:
+                # Convert to chat_history format
+                st.session_state.chat_history = [
+                    {"role": "user" if msg["type"] == "User" else "assistant", 
+                     "content": msg["content"]}
+                    for msg in messages
+                ]
+                st.info(f"📜 Loaded {len(messages)} previous messages from conversation history")
+            # Mark that we've loaded history for this thread
+            st.session_state.history_loaded_for_thread = st.session_state.thread_id
+        except Exception as e:
+            # If loading fails (e.g., new thread with no history), just continue
+            logger.debug(f"Could not load history for thread {st.session_state.thread_id}: {e}")
+            st.session_state.history_loaded_for_thread = st.session_state.thread_id
 
     # Sidebar settings
     st.sidebar.subheader("⚙️ Chat Settings")
@@ -230,9 +290,10 @@ def render_customer():
     ):
         st.session_state.thread_id = str(uuid.uuid4())
         st.session_state.chat_history = []
+        st.session_state.history_loaded_for_thread = None  # Reset history loaded flag
         st.rerun()
 
-    st.sidebar.caption(f"Thread ID: {st.session_state.thread_id[:8]}...")
+    st.sidebar.caption(f"Thread ID: {st.session_state.thread_id}")
 
     # Display chat history
     for message in st.session_state.chat_history:
@@ -269,9 +330,9 @@ def render_customer():
                     placeholder = st.empty()
                     full_response = ""
 
-                    # Stream from customer pipeline
-                    # Pipeline flow: START → answer → save_conversation → END
-                    for event in customer.stream(
+                    # Stream from customer pipeline with async checkpointer
+                    # Pipeline flow: START → answer → END
+                    for event in st.session_state.customer.stream(
                         state,
                         config={
                             "configurable": {"thread_id": st.session_state.thread_id}
