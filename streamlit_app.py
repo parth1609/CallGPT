@@ -3,6 +3,7 @@ import uuid
 import tempfile
 import streamlit as st
 import requests
+from pathlib import Path
 from dotenv import load_dotenv
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage, FunctionMessage
 import logging as logger

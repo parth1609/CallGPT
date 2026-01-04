@@ -24,7 +24,7 @@ def main():
     Replace 'your_specific_thread_id' with an actual thread ID from your database.
     """
     # Example thread ID - replace with your actual thread ID
-    thread_id = "24debbd5-7947-48e7-a24a-40b764fff1c7"
+    thread_id = "5b38ffdb-bab1-46cc-99a9-4b986938dec2"
     
     print(f"Retrieving history for thread: {thread_id}\n")
     print("=" * 80)
@@ -35,11 +35,11 @@ def main():
         
         # Print the conversation
         print(f"\nFound {len(messages)} messages:\n")
-        # for i, msg in enumerate(messages, 1):
-        #     print(f"[{i}] {msg['type']}: {msg['content']}")
-        #     print("-" * 80)
+        for i, msg in enumerate(messages, 1):
+            print(f"[{i}] {msg['type']}: {msg['content']}")
+            print("-" * 80)
 
-        print(messages)
+        # print(messages)
             
     except Exception as e:
         print(f"Error: {e}")

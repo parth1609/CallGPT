@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from uuid import uuid4
 
 from psycopg_pool import AsyncConnectionPool
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import dict_row
 from pgvector.psycopg import register_vector_async
 from langgraph.prebuilt import create_react_agent
@@ -67,7 +68,7 @@ class ConversationService:
         - thread_id: The thread ID to retrieve
         
         Returns:
-        - List of message dictionaries
+        - List of message dictionaries (without duplicates)
         """
         import logging
         logger = logging.getLogger(__name__)
@@ -79,14 +80,17 @@ class ConversationService:
         thread_history = list(checkpointer_instance.list(config))
         logger.debug(f"Found {len(thread_history)} checkpoints for thread {thread_id}")
         
-        # Process the history to extract messages
+        # IMPORTANT: Each checkpoint contains the FULL conversation state up to that point
+        # So we only need to get messages from the MOST RECENT checkpoint
+        # Otherwise we get duplicates!
         messages = []
-        for checkpoint in reversed(thread_history):  # Reverse to get chronological order
-            # Extract messages from the checkpoint data
-            checkpoint_messages = checkpoint.checkpoint.get("channel_values", {}).get("messages", [])
-            messages.extend(checkpoint_messages)
+        if thread_history:
+            # Get the most recent checkpoint (first in the list since they're in reverse chronological order)
+            latest_checkpoint = thread_history[0]
+            checkpoint_messages = latest_checkpoint.checkpoint.get("channel_values", {}).get("messages", [])
+            messages = checkpoint_messages
         
-        logger.debug(f"Extracted {len(messages)} total messages from {len(thread_history)} checkpoints")
+        logger.debug(f"Extracted {len(messages)} total messages from latest checkpoint")
         
         # Convert messages to dictionary format for easier processing
         result = []
