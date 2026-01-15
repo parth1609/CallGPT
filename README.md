@@ -1,10 +1,10 @@
-# 💬 CallGPT
+# 💬 VocaliZ
 
-**CallGPT** is an intelligent document chat system that helps organizations make their knowledge accessible through conversational AI. Upload your documents, and let your team or customers ask questions in natural language—getting accurate, context-aware answers instantly.
+**VocaliZ** is an intelligent document chat system that helps organizations make their knowledge accessible through conversational AI. Upload your documents, and let your team or customers ask questions in natural language—getting accurate, context-aware answers instantly.
 
 ---
 
-## 🌟 What Can CallGPT Do?
+## 🌟 What Can VocaliZ Do?
 
 ### For Organizations
 - **Upload Documents**: Simply upload your text files (manuals, FAQs, policies, knowledge bases, etc.)
@@ -21,7 +21,7 @@
 
 ## 🎯 Use Cases
 
-CallGPT is perfect for:
+VocaliZ is perfect for:
 
 - **Customer Support**: Let customers find answers from your documentation instantly
 - **Employee Onboarding**: New employees can ask questions about company policies and procedures
@@ -72,7 +72,7 @@ You'll need:
 
 ### Uploading Documents (Organization Mode)
 
-1. Open the CallGPT interface in your browser
+1. Open the VocaliZ interface in your browser
 2. Switch to **"Org"** mode in the sidebar
 3. Configure your settings:
    - **Bucket/Index Name**: Choose a name for your document collection (e.g., "customer-support")
@@ -100,7 +100,7 @@ You'll need:
 
 ## 🏗️ System Architecture
 
-CallGPT uses a **Retrieval-Augmented Generation (RAG)** architecture:
+VocaliZ uses a **Retrieval-Augmented Generation (RAG)** architecture:
 
 ```
 User Question → Document Search → Context Retrieval → AI Answer Generation → Response
