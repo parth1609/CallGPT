@@ -1,0 +1,235 @@
+/* Modern SaaS Sidebar - Light Purple/Blue Theme */
+.sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 260px;
+    background: linear-gradient(180deg, #f8f7ff 0%, #f0f0ff 100%);
+    display: flex;
+    flex-direction: column;
+    z-index: 1000;
+    border-right: 1px solid rgba(139, 92, 246, 0.1);
+    box-shadow: 4px 0 24px rgba(139, 92, 246, 0.05);
+}
+
+/* Logo Section */
+.sidebar-header {
+    padding: 24px 20px;
+    border-bottom: 1px solid rgba(139, 92, 246, 0.1);
+}
+
+.sidebar-logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logo-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+    border-radius: 12px;
+    color: #ffffff;
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+
+.logo-text {
+    font-size: 1.5rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -0.5px;
+}
+
+/* Navigation */
+.sidebar-nav {
+    flex: 1;
+    padding: 20px 12px;
+    overflow-y: auto;
+}
+
+.sidebar-menu {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.sidebar-menu-item {
+    margin: 0;
+}
+
+.sidebar-link {
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    color: #64748b;
+    text-decoration: none;
+    border-radius: 12px;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.sidebar-link::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: linear-gradient(180deg, #8b5cf6 0%, #6366f1 100%);
+    border-radius: 0 4px 4px 0;
+    transform: scaleY(0);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-link:hover {
+    background: rgba(139, 92, 246, 0.08);
+    color: #7c3aed;
+    transform: translateX(4px);
+}
+
+.sidebar-link:hover .sidebar-icon {
+    color: #8b5cf6;
+}
+
+.sidebar-link.active {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(99, 102, 241, 0.1) 100%);
+    color: #7c3aed;
+    font-weight: 500;
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.1);
+}
+
+.sidebar-link.active::before {
+    transform: scaleY(1);
+}
+
+.sidebar-link.active .sidebar-icon {
+    color: #8b5cf6;
+}
+
+.sidebar-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    margin-right: 14px;
+    color: #94a3b8;
+    transition: all 0.25s ease;
+}
+
+.sidebar-icon svg {
+    width: 20px;
+    height: 20px;
+}
+
+.sidebar-label {
+    font-size: 0.925rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+}
+
+/* Footer / Logout */
+.sidebar-footer {
+    padding: 16px 12px 24px;
+    border-top: 1px solid rgba(139, 92, 246, 0.1);
+}
+
+.logout-btn {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 14px 16px;
+    background: transparent;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    color: #94a3b8;
+    cursor: pointer;
+    font-size: 0.925rem;
+    font-weight: 500;
+    border-radius: 12px;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.logout-btn:hover {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+    transform: translateX(4px);
+}
+
+.logout-btn:hover .sidebar-icon {
+    color: #ef4444;
+}
+
+.logout-btn:active {
+    transform: translateX(4px) scale(0.98);
+}
+
+/* Scrollbar Styling */
+.sidebar-nav::-webkit-scrollbar {
+    width: 4px;
+}
+
+.sidebar-nav::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+    background: rgba(139, 92, 246, 0.2);
+    border-radius: 4px;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb:hover {
+    background: rgba(139, 92, 246, 0.3);
+}
+
+/* Subtle animation for menu items */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateX(-8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.sidebar-menu-item {
+    animation: fadeIn 0.3s ease forwards;
+}
+
+.sidebar-menu-item:nth-child(1) {
+    animation-delay: 0.05s;
+}
+
+.sidebar-menu-item:nth-child(2) {
+    animation-delay: 0.1s;
+}
+
+.sidebar-menu-item:nth-child(3) {
+    animation-delay: 0.15s;
+}
+
+.sidebar-menu-item:nth-child(4) {
+    animation-delay: 0.2s;
+}
+
+.sidebar-menu-item:nth-child(5) {
+    animation-delay: 0.25s;
+}
+
+.sidebar-menu-item:nth-child(6) {
+    animation-delay: 0.3s;
+}
