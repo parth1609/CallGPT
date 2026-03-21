@@ -50,7 +50,7 @@ if __name__ == "__main__":
     print("--- Checking Imports ---")
     modules_to_check = [
         "app.main",
-        "app.pipeline",
+        "app.modules.pipeline.router",
         "app.modules.embedding.router",
         "app.modules.retrieval.router",
         "app.modules.llm.router",

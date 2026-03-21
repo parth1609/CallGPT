@@ -2,7 +2,11 @@ import os
 from vapi import Vapi, CreateByoPhoneNumberDto
 from vapi.core.api_error import ApiError
 
-VAPI_API_TOKEN = "02ed50e1-8433-4ac9-ae19-c488fc839899"
+VAPI_API_TOKEN = os.getenv("VAPI_API_TOKEN", "")
+
+if not VAPI_API_TOKEN:
+    print("Error: VAPI_API_TOKEN not set in .env file")
+    exit()
 
 # Instantiate the Vapi client with your API token
 # For security, load your token from an environment variable

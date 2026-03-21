@@ -1,19 +1,35 @@
 import os
+import io
 import uuid
 import tempfile
 import streamlit as st
+import streamlit.components.v1 as components
 import requests
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage, FunctionMessage
 import logging as logger
+
+from app.modules.voice.service import VoiceService
+
+# Optional: pip install audio-recorder-streamlit
+try:
+    from audio_recorder_streamlit import audio_recorder
+    AUDIO_RECORDER_AVAILABLE = True
+except ImportError:
+    AUDIO_RECORDER_AVAILABLE = False
+
 load_dotenv(override=False)
 
 # API Configuration
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
-project_root = Path(__file__).parent.parent 
-from app.modules.pipeline.pipeline import customer
+# Add project root to path
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+
+from app.modules.pipeline.pipeline import customer, checkpointer, _THREAD_RETRIEVERS, _THREAD_METADATA
 
 st.set_page_config(page_title="CallGPT", page_icon="💬", layout="wide")
 
@@ -37,6 +53,27 @@ st.markdown('<p class="big-font">💬 CallGPT</p>', unsafe_allow_html=True)
 st.markdown('<p class="medium-font">Enterprise RAG System</p>', unsafe_allow_html=True)
 
 st.divider()
+
+
+def custom_audio_player(audio_bytes: bytes, autoplay: bool = True):
+    """Render a compact audio player with tiny play/pause buttons"""
+    import base64
+    b64 = base64.b64encode(audio_bytes).decode('utf-8')
+    autoplay_attr = "autoplay" if autoplay else ""
+    html = f"""
+        <div style="display: flex; align-items: center; gap: 8px; font-family: sans-serif; margin-top: 5px;">
+            <audio id="tts-player" src="data:audio/mp3;base64,{b64}" {autoplay_attr}></audio>
+            <button onclick="document.getElementById('tts-player').play()" 
+                    style="background: transparent; color: #4CAF50; border: 1px solid #4CAF50; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 14px; transition: 0.2s;">
+                ▶ Play
+            </button>
+            <button onclick="document.getElementById('tts-player').pause()" 
+                    style="background: transparent; color: #f44336; border: 1px solid #f44336; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 14px; transition: 0.2s;">
+                ⏸ Pause
+            </button>
+        </div>
+    """
+    components.html(html, height=40)
 
  
 
@@ -285,6 +322,18 @@ def render_customer():
             fetch_k = 20
             reranker_model = "bge-reranker-v2-m3"
 
+    # Voice settings
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🎙️ Voice Settings")
+    enable_voice = st.sidebar.toggle(
+        "Enable Voice Response (TTS)",
+        value=True,
+    )
+    enable_mic = st.sidebar.toggle(
+        "Enable Microphone Input (STT)",
+        value=True,
+    )
+
     # New conversation button
     if st.sidebar.button(
         "➕ New Conversation", use_container_width=True, type="primary"
@@ -302,7 +351,32 @@ def render_customer():
             st.markdown(message["content"])
 
     # Chat input
-    if user_input := st.chat_input("Ask a question about your documents"):
+    user_input = st.chat_input("Ask a question about your documents")
+
+    # Voice input (microphone)
+    if enable_mic:
+        if AUDIO_RECORDER_AVAILABLE:
+            # Render right above the chat input compactly
+            voice_audio_bytes = audio_recorder(
+                text="🎙️ Click to speak",
+                recording_color="#e74c3c",
+                neutral_color="#6c757d",
+                icon_size="1x",
+            )
+            if voice_audio_bytes is not None and len(voice_audio_bytes) > 0 and not user_input:
+                with st.spinner("🎙️ Transcribing your voice..."):
+                    transcribed_text = VoiceService().transcribe(voice_audio_bytes)
+                if transcribed_text:
+                    user_input = transcribed_text
+                else:
+                    st.warning("Could not transcribe audio. Please try again.")
+        else:
+            st.warning(
+                "Install streamlit-audiorecorder for mic input: "
+                "`pip install streamlit-audiorecorder`"
+            )
+
+    if user_input:
         # Add user message to history
         st.session_state.chat_history.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
@@ -332,34 +406,36 @@ def render_customer():
                     full_response = ""
 
                     # Stream from customer pipeline with async checkpointer
-                    # Pipeline flow: START → answer → END
-                    for event in st.session_state.customer.stream(
+                    events = st.session_state.customer.stream(
                         state,
-                        config={
-                            "configurable": {"thread_id": st.session_state.thread_id}
-                        },
+                        config={"configurable": {"thread_id": st.session_state.thread_id}},
                         stream_mode="updates",
-                    ):
-                        # Handle answer node streaming
+                    )
+
+                    for event in events:
                         if "answer" in event:
                             chunk = event["answer"]
-
-                            # Check for message chunks (streaming tokens)
                             if "messages" in chunk:
                                 for msg in chunk["messages"]:
                                     if hasattr(msg, "content") and msg.content:
                                         full_response += msg.content
                                         placeholder.markdown(full_response + "▌")
-
-                            # Check for final answer
-                            if "answer" in chunk:
-                                full_response = chunk["answer"]
+                            if "answer" in chunk and isinstance(chunk["answer"], str):
+                                full_response += chunk["answer"]
+                                placeholder.markdown(full_response + "▌")
 
                     # Display final response
                     placeholder.markdown(full_response)
                     st.session_state.chat_history.append(
                         {"role": "assistant", "content": full_response}
                     )
+
+                    # TTS: Generate and play audio response
+                    if enable_voice and full_response:
+                        with st.spinner("🔊 Generating audio response..."):
+                            tts_audio_bytes = VoiceService().speak(full_response)
+                            if tts_audio_bytes:
+                                custom_audio_player(tts_audio_bytes, autoplay=True)
 
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
@@ -375,18 +451,3 @@ if mode == "Org":
     render_org()
 else:
     render_customer()
-
-st.divider()
-
-# Info section
-st.markdown("### ℹ️ About")
-st.info(f"""
-**CallGPT** is a Retrieval-Augmented Generation (RAG) system that allows organizations to:
-- Index their documents efficiently using LangGraph pipelines
-- Enable customers to chat with document collections
-- Get accurate, context-aware responses powered by LLMs
-
-**Architecture:** This Streamlit frontend communicates with a FastAPI backend via REST API.
-
-**API Endpoint:** `{API_BASE_URL}`
-""")

@@ -272,7 +272,7 @@ class RetrievalService:
         - List of diverse, relevant results
         """
         # Get query embedding
-        query_embedding = self._get_query_embedding(query, embedding_model)
+        query_embedding = self._get_query_embedding(text_query, embedding_model)
 
         # Fetch more candidates than needed for MMR
         try:

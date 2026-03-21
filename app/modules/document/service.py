@@ -39,14 +39,27 @@ class DocumentService:
         - Sets default bucket name from environment or parameter
         """
         self.supabase_url = supabase_url or os.getenv("SUPABASE_URL")
-        self.supabase_key = supabase_key or os.getenv("SUPABASE_KEY")
+        self.supabase_key = (
+            supabase_key
+            or os.getenv("SUPABASE_SERVICE_KEY")
+            or os.getenv("SUPABASE_API_KEY")
+            or os.getenv("SUPABASE_KEY")
+        )
         self.bucket_name = bucket_name or os.getenv("SUPABASE_BUCKET", "user-files")
 
         if not self.supabase_url or not self.supabase_key:
-            raise ValueError("Supabase URL and Key must be provided")
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("⚠️ Supabase URL or Key not provided. DocumentService will not be functional.")
+            return
 
         self.client: Client = create_client(self.supabase_url, self.supabase_key)
-        self._ensure_bucket_exists()
+        try:
+            self._ensure_bucket_exists()
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"⚠️ Could not ensure bucket exists: {e}")
 
     def _ensure_bucket_exists(self) -> None:
         """

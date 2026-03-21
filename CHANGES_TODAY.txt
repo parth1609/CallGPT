@@ -1,0 +1,39 @@
+# CallGPT Voice Integration - Summary of Changes and Bug Fixes
+
+## What We Built Today
+We successfully integrated an end-to-end Voice Chatbot experience into the CallGPT Streamlit application!
+1. **Speech-to-Text (STT):** You can now natively speak your questions by using a new microphone button located right above the chat input bar. It accurately transcribes your spoken audio directly into the chat, just as if you had manually typed it. 
+2. **Text-to-Speech (TTS):** When the assistant answers your question, the app instantly generates an ultra-fast, high-quality human voice to read the answer audibly back to you.
+3. **Custom Mini Player UI:** Instead of Streamlit's large, clunky default audio player bar, we designed a custom, compact HTML widget that displays only "▶ Play" and "⏸ Pause" buttons right beneath the chatbot's answer.
+4. **General UI Improvements:** Removing the bloated "About" section to give more room for the chat, and naturally turning STT and TTS 'ON' by default.
+
+---
+
+## Errors We Encountered & How We Solved Them
+
+### 1. The `audioop` Missing Package In Python 3.13
+- **Error:** `ModuleNotFoundError: No module named 'audioop'`
+- **Cause:** Python natively removed this module in version 3.13, breaking the `streamlit-audiorecorder` package internally.
+- **Solution:** We explicitly installed the `audioop-lts` backwards-compatible polyfill package in your `requirements.txt`.
+
+### 2. The Native Windows FFmpeg Crash
+- **Error:** `FileNotFoundError: [WinError 2] The system cannot find the file specified` inside `pydub`.
+- **Cause:** To convert browser audio, the `pydub` package relies on a heavy system installation of `ffmpeg` which was not present on your Windows machine.
+- **Solution:** Instead of forcing you to install complex software, we ripped out `streamlit-audiorecorder` entirely and replaced it with `audio-recorder-streamlit`, which natively encodes bytes to `.wav` format inside the browser without needing `pydub` or `ffmpeg`. 
+
+### 3. Groq's PlayAI Model Deprecation
+- **Error:** `The model playai-tts has been decommissioned and is no longer available.`
+- **Cause:** Our original plan was to use Groq for both Text-to-Speech and Speech-to-Text. Groq recently discontinued and deleted all PlayAI TTS models from their platform. 
+- **Solution:** Initially we fell back to Google TTS (`gTTS`). When that was deemed too "robotic," we transitioned to an ElevenLabs key present in your `.env`.
+
+### 4. ElevenLabs Quota Exhaustion
+- **Error:** `You have reached the end of your free tier. Please upgrade to any Paid Subscription to continue.`
+- **Cause:** The ElevenLabs API key was perfectly valid, but the account providing the key had zero free-tier credits remaining.
+- **Solution:** We transitioned the VoiceService engine to use **Microsoft Edge-TTS** (`edge-tts`). This allows the app to generate extremely premium neural voices (such as `JennyNeural`) instantaneously, for absolute free, and with zero API/credential limitations!
+
+---
+
+## Final Architecture
+The integrated `app/modules/voice/service.py` functions using:
+- **Input (Microphone to Text):** Powered by Groq `whisper-large-v3-turbo` model for high-reliability transcriptions.
+- **Output (Text to Voice):** Powered by Microsoft's `edge-tts` for high-quality, completely free neural streaming generation avoiding API credits.
