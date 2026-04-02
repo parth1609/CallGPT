@@ -16,6 +16,7 @@ torch
 streamlit
 audio-recorder-streamlit
 edge-tts
+pydub
 
 #providers
 groq

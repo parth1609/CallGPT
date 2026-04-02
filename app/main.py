@@ -8,6 +8,7 @@ from app.modules.conversation.router import router as conversation_router
 from app.modules.document.router import router as document_router
 from app.modules.vectorstore.router import router as vectorstore_router
 from app.modules.pipeline.router import router as pipeline_router
+from app.modules.voicebot.router import router as voicebot_router
 
 app = FastAPI(
     title=settings.APP_TITLE,
@@ -36,6 +37,7 @@ app.include_router(
     vectorstore_router, prefix="/api/v1/vectorstore", tags=["VectorStore"]
 )
 app.include_router(pipeline_router, prefix="/api/v1/pipeline", tags=["Pipeline"])
+app.include_router(voicebot_router, tags=["Voicebot"])
 
 
 @app.get("/health")
