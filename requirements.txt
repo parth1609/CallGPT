@@ -14,17 +14,24 @@ python-dotenv
 sentence-transformers
 torch
 streamlit
+audio-recorder-streamlit
+edge-tts
+pydub
 
 #providers
 groq
 pinecone
 supabase
+psycopg-pool
+pgvector
 
 #langchain dependencies
 langchain
 langchain-huggingface
 langchain-pinecone
 langchain-core
+langchain-groq
+langchain-text-splitters
 langgraph
 langgraph-checkpoint-postgres
 langchain-community

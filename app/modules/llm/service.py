@@ -142,7 +142,7 @@ class LLMService:
 # ============================================================================
 
 
-def get_groq_llm(model: str = "llama-3.1-8b-instant", temperature: float = 0.1):
+def get_groq_llm(model: str = None, temperature: float = 0.1):
     """
     Purpose: Initialize a Groq chat LLM via langchain_groq for pipeline usage.
 
@@ -165,6 +165,8 @@ def get_groq_llm(model: str = "llama-3.1-8b-instant", temperature: float = 0.1):
     True
     """
     from langchain_groq import ChatGroq
+
+    model = model or os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 
     if not os.getenv("GROQ_API_KEY"):
         raise EnvironmentError("GROQ_API_KEY is not set in environment.")

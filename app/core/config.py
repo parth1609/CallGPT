@@ -10,16 +10,16 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
 
     # Database (Postgres)
-    DATABASE_URL: str
+    DATABASE_URL: Optional[str] = None
 
     # Supabase
     SUPABASE_URL: str
-    SUPABASE_KEY: str
+    SUPABASE_KEY: Optional[str] = None
     SUPABASE_API_KEY: Optional[str] = None  # Optional, for pgvector operations
     SUPABASE_BUCKET: str
 
     # Pinecone
-    PINECONE_API_KEY: str
+    PINECONE_API_KEY: Optional[str] = None
     PINECONE_CLOUD: str = "aws"
     PINECONE_REGION: str = "us-east-1"
 

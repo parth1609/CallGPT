@@ -15,7 +15,6 @@ from uuid import uuid4
 from psycopg_pool import AsyncConnectionPool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import dict_row
-from pgvector.psycopg import register_vector_async
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
 
@@ -36,7 +35,10 @@ class ConversationService:
         self.database_url = database_url or os.getenv("DATABASE_URL")
 
         if not self.database_url:
-            raise ValueError("DATABASE_URL must be provided")
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("⚠️ DATABASE_URL not provided. ConversationService will not be functional.")
+            return # Don't try to create pool if we don't have URL
 
         self.pool = AsyncConnectionPool(
             conninfo=self.database_url,
