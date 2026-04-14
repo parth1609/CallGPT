@@ -1,5 +1,13 @@
-from __future__ import annotations
 import os
+import time
+import logging
+
+# Force HuggingFace offline mode BEFORE any transformers/sentence-transformers imports.
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = "./models_cache"
+
 from fileinput import filename
 from typing import Any, Dict, List, Optional, TypedDict
 from typing import Annotated, Sequence
@@ -12,13 +20,13 @@ from torch.nn import Embedding
 
 # Import utility functions from modules (backend pattern)
 from app.modules.embedding.service import get_embedding_model, EmbeddingService
-from app.modules.llm.service import get_groq_llm, get_qa_prompt, LLMService
+from app.modules.llm.service import get_groq_llm, get_qa_prompt, get_llm_service, LLMService
 from app.modules.document.service import (
     chunk_documents,
     load_text_file,
     DocumentService,
 )
-from app.modules.retrieval.service import RetrievalService
+from app.modules.retrieval.service import get_retrieval_service, RetrievalService
 from app.modules.conversation.service import ConversationService
 from app.modules.vectorstore.service import VectorStoreService
 
@@ -320,24 +328,24 @@ def node_answer(state: RAGState):
         logger.warning(f"STEP 0 WARNING: Could not ensure index: {str(e)}")
         # Continue anyway - index might exist but check failed
 
-    # Retrieval service
-    logger.debug(f"STEP 1: Initializing RetrievalService with index_name={index_name}")
-    retriever_service = RetrievalService(index_name=index_name)
-
-    # LLM Service
-    logger.debug("STEP 2: Initializing LLMService")
-    llm_service = LLMService()
+    # Retrieval service (Module-level singleton to avoid 2-3s setup)
+    retriever_service = get_retrieval_service(index_name=index_name)
+    
+    # LLM Service (Module-level singleton)
+    llm_service = get_llm_service()
 
     query = state.get("question")
     logger.debug(f"STEP 3: Query extracted: {query[:100] if query else None}...")
 
-    # Get query embedding
+    # Get query embedding (Cached model)
     logger.debug("STEP 4: Getting query embedding")
+    t_embed_start = time.time()
     query_embedding = retriever_service._get_query_embedding(
         query, model_name=state.get("embeddings_model")
     )
+    t_embed = time.time() - t_embed_start
     logger.debug(
-        f"STEP 4 OUTPUT: Query embedding dimension={len(query_embedding) if query_embedding else 0}"
+        f"STEP 4 OUTPUT: Query embedding dimension={len(query_embedding) if query_embedding else 0} | ⏱️ {t_embed:.2f}s"
     )
 
     # Get QA prompt template
@@ -345,21 +353,25 @@ def node_answer(state: RAGState):
     prompt = get_qa_prompt()
 
     # Perform search based on search_type
-    search_type = state.get("search_type", "similarity_search")
-    use_reranker = state.get("use_reranker", False)
-    logger.debug(f"STEP 6: Performing {search_type}, use_reranker={use_reranker}")
+    # Force search_type=similarity_search and use_reranker=False for sub-3s voicebot speed
+    search_type = "similarity_search"
+    use_reranker = False
+    
+    # Use k=2 for small, fast context
+    k = 2
+    
+    logger.debug(f"STEP 6: Performing {search_type}, use_reranker={use_reranker}, k={k}")
 
     if search_type == "similarity_search":
-        logger.debug(f"STEP 6a: similarity_search with k={state.get('k', 4)}")
+        t_search_start = time.time()
         search_results = retriever_service.similarity_search(
             query=query,
-            k=state.get("k", 4),
+            k=k,
             embedding_model=state.get("embeddings_model"),
             use_reranker=use_reranker,
-            fetch_k=state.get("fetch_k", 20),
-            reranker_model=state.get("reranker_model", "bge-reranker-v2-m3"),
         )
-        logger.debug(f"STEP 6a OUTPUT: Found {len(search_results)} results")
+        t_search = time.time() - t_search_start
+        logger.debug(f"STEP 6a OUTPUT: Found {len(search_results)} results | ⏱️ {t_search:.2f}s")
     elif search_type == "mmr_search":
         logger.debug(
             f"STEP 6b: mmr_search with k={state.get('k', 4)}, fetch_k={state.get('fetch_k', 20)}"
@@ -397,10 +409,17 @@ def node_answer(state: RAGState):
     ]
     logger.debug(f"STEP 7 OUTPUT: Created {len(docs)} Document objects")
 
-    # Prepare context from documents
+    # Prepare context from documents (with deduplication)
     logger.debug("STEP 8: Preparing context from retrieved documents")
-    context = "\n\n".join(d.page_content for d in docs)
-    logger.debug(f"STEP 8 OUTPUT: Context length={len(context)} characters")
+    seen_content = set()
+    unique_docs = []
+    for d in docs:
+        if d.page_content not in seen_content:
+            unique_docs.append(d.page_content)
+            seen_content.add(d.page_content)
+    
+    context = "\n\n".join(unique_docs)
+    logger.debug(f"STEP 8 OUTPUT: Context length={len(context)} characters (deduplicated)")
 
     # Create the full message list
     logger.debug("STEP 9: Building message history")
@@ -430,15 +449,21 @@ def node_answer(state: RAGState):
 
     # Stream tokens and yield AI message chunks for smoother UI
     logger.debug(
-        f"STEP 11: Starting LLM streaming with model={state.get('llm_model', 'openai/gpt-oss-120b')}"
+        f"STEP 11: Starting LLM streaming with model={state.get('llm_model', 'llama-3.3-70b-versatile')}"
     )
+    t_llm_start = time.time()
+    t_first_token = None
     answer_accum = ""
     chunk_count = 0
     for chunk in llm_service.stream_chat(
         messages=messages_dict,
-        model=state.get("llm_model", "openai/gpt-oss-120b"),
+        model=state.get("llm_model", "llama-3.3-70b-versatile"),
         temperature=state.get("temperature", 0.5),
     ):
+        if t_first_token is None:
+            t_first_token = time.time() - t_llm_start
+            logger.debug(f"⏱️ Time to first token: {t_first_token:.2f}s")
+
         delta = chunk.get("content", "")
         if not delta:
             continue
@@ -447,8 +472,9 @@ def node_answer(state: RAGState):
         # Emit incremental assistant chunks via the messages channel
         yield {"messages": [AIMessageChunk(content=delta)]}
 
+    t_llm_total = time.time() - t_llm_start
     logger.debug(
-        f"STEP 11 OUTPUT: Streamed {chunk_count} chunks, total answer length={len(answer_accum)}"
+        f"STEP 11 OUTPUT: Streamed {chunk_count} chunks, total answer length={len(answer_accum)} | ⏱️ Total LLM duration: {t_llm_total:.2f}s"
     )
 
     # Finalize: return full answer and persist the turn into memory

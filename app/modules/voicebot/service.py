@@ -61,11 +61,17 @@ def mp3_to_pcm(mp3_bytes: bytes, target_rate: int = 8000, target_channels: int =
     Returns:
     - Raw PCM audio bytes
     """
-    from pydub import AudioSegment
-
     audio = AudioSegment.from_mp3(io.BytesIO(mp3_bytes))
     audio = audio.set_frame_rate(target_rate).set_channels(target_channels).set_sample_width(target_width)
-    return audio.raw_data
+    raw_pcm = audio.raw_data
+    
+    # Ensure raw PCM length is a multiple of 320 bytes for Exotel compatibility
+    remainder = len(raw_pcm) % 320
+    if remainder != 0:
+        padding = b'\x00' * (320 - remainder)
+        raw_pcm += padding
+        
+    return raw_pcm
 
 
 # ---------------------------------------------------------------------------

@@ -77,7 +77,14 @@ class DocumentService:
                     self.bucket_name, options={"public": True}
                 )
         except Exception as e:
-            print(f"Bucket check/creation warning: {e}")
+            # Handle RLS/Permission errors gracefully (common with anon keys)
+            error_str = str(e)
+            if "403" in error_str or "violates row-level security" in error_str.lower():
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"ℹ️ Storage bucket '{self.bucket_name}' check skipped due to restricted permissions. Assuming it exists.")
+            else:
+                print(f"Bucket check/creation warning: {e}")
 
     def upload_document(
         self,
