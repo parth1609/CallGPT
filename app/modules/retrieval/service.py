@@ -5,6 +5,14 @@ Supports two-stage retrieval with Pinecone reranking.
 """
 
 import os
+
+# Critical: Enforce HuggingFace offline mode at the absolute top of the module.
+# This prevents network update checks in background executor threads.
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = "./models_cache"
+
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from pinecone import Pinecone
@@ -357,3 +365,36 @@ class RetrievalService:
         if magnitude1 == 0 or magnitude2 == 0:
             return 0.0
         return dot_product / (magnitude1 * magnitude2)
+
+
+# ============================================================================
+# Pipeline Utilities (Backend-compatible functions for LangGraph integration)
+# ============================================================================
+
+# Module-level singleton cache for RetrievalService.
+# Ensures the Pinecone connection and Embedding service are re-used across all calls.
+_RETRIEVER_CACHE: dict = {}
+
+
+def get_retrieval_service(index_name: str = None) -> RetrievalService:
+    """
+    Purpose: Return a cached RetrievalService instance for the specified index.
+
+    Avoids the 2-3 second Pinecone initialization and Embedding model load
+    on every single turn in the RAG pipeline.
+
+    Parameters:
+    - index_name (str): The name of the Pinecone index.
+
+    Return Value:
+    - RetrievalService: A cached service instance.
+    """
+    global _RETRIEVER_CACHE
+
+    if index_name is None:
+        index_name = os.getenv("SUPABASE_BUCKET", "openai-bucket")
+
+    if index_name not in _RETRIEVER_CACHE:
+        _RETRIEVER_CACHE[index_name] = RetrievalService(index_name=index_name)
+
+    return _RETRIEVER_CACHE[index_name]

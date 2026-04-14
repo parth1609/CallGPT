@@ -25,7 +25,7 @@ class LLMService:
     def __init__(self, default_model: str = None):
         """Initialize LLM Service"""
         self.default_model = default_model or os.getenv(
-            "LLM_MODEL", "openai/gpt-oss-120b"
+            "LLM_MODEL", "llama-3.3-70b-versatile"
         )
         self.groq_api_key = os.getenv("GROQ_API_KEY")
 
@@ -166,7 +166,7 @@ def get_groq_llm(model: str = None, temperature: float = 0.1):
     """
     from langchain_groq import ChatGroq
 
-    model = model or os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
+    model = model or os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 
     if not os.getenv("GROQ_API_KEY"):
         raise EnvironmentError("GROQ_API_KEY is not set in environment.")
@@ -204,7 +204,7 @@ def get_qa_prompt():
                     "Your role is to assist customers calling the company by giving clear, polite, and accurate spoken-style answers.\n"
                     "Use ONLY the provided context to answer the question.\n"
                     "If the answer is not found in the context, say politely that you don't have that information.\n"
-                    "Keep responses short, natural, and conversational (like talking on a call).\n"
+                    "Keep responses ultra-short, natural, and conversational (one sentence, under 20 words).\n"
                     "Do NOT make up information. Do NOT reference 'documents' or 'context' explicitly."
                 ),
             ),
@@ -218,3 +218,35 @@ def get_qa_prompt():
             ),
         ]
     )
+
+
+# ============================================================================
+# Pipeline Utilities (Backend-compatible functions for LangGraph integration)
+# ============================================================================
+
+# Module-level singleton cache for LLMService.
+# Ensures the Groq client and its configuration are re-used across all calls.
+_LLM_SERVICE_CACHE: dict = {}
+
+
+def get_llm_service(default_model: str = None) -> LLMService:
+    """
+    Purpose: Return a cached LLMService instance.
+
+    Avoids the overhead of re-initializing the Groq client and fetching
+    environment variables on every single turn in the RAG pipeline.
+
+    Parameters:
+    - default_model (str): Optional override for the default model.
+
+    Return Value:
+    - LLMService: A cached service instance.
+    """
+    global _LLM_SERVICE_CACHE
+
+    # Use a fixed key for the singleton since it handles internal model switching
+    cache_key = "default"
+    if cache_key not in _LLM_SERVICE_CACHE:
+        _LLM_SERVICE_CACHE[cache_key] = LLMService(default_model=default_model)
+
+    return _LLM_SERVICE_CACHE[cache_key]

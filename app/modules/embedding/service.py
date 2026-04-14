@@ -4,6 +4,14 @@ Handles text chunking and embedding generation.
 """
 
 import os
+
+# Critical: Enforce HuggingFace offline mode at the absolute top of the module.
+# This prevents network update checks in background executor threads.
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = "./models_cache"
+
 from typing import List, Tuple
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -48,32 +56,16 @@ class EmbeddingService:
         self.default_model = default_model or os.getenv(
             "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
         )
-        self._model_cache = {}
+
+        # Pre-warm the module-level global singleton to ensure the model is loaded exactly ONCE
+        # across all instances of EmbeddingService and the overall application.
+        get_embedding_model(self.default_model)
 
     def _get_embedding_model(self, model_name: str = None):
         """
-        Get or create embedding model instance.
-
-        Parameters:
-        - model_name (Optional[str]): Model name, uses default if None
-
-        Return Value:
-        - HuggingFaceEmbeddings: Embedding model instance
-
-        Side Effects:
-        - Caches model instances for reuse
-        - Downloads model on first use
+        Get or create embedding model instance (wrapper for global singleton).
         """
-        model_name = model_name or self.default_model
-
-        if model_name not in self._model_cache:
-            self._model_cache[model_name] = HuggingFaceEmbeddings(
-                model_name=model_name,
-                model_kwargs={"device": "cpu"},
-                encode_kwargs={"normalize_embeddings": True},
-            )
-
-        return self._model_cache[model_name]
+        return get_embedding_model(model_name or self.default_model)
 
     def chunk_text(
         self,
@@ -187,34 +179,40 @@ class EmbeddingService:
 # ============================================================================
 
 
+# Module-level singleton cache for embedding models.
+# Ensures the HuggingFace model is loaded exactly ONCE across all pipeline calls.
+_EMBEDDING_MODEL_CACHE: dict = {}
+
+
 def get_embedding_model(model_name: str = None):
     """
     Purpose: Return a LangChain Embeddings instance for the specified model.
 
-    This utility function creates an embeddings model instance that can be used
-    directly in the RAG pipeline, following the backend pattern.
+    Uses a module-level singleton so the model is loaded once and reused,
+    avoiding the 4-5 second HuggingFace download/check on every call.
 
     Parameters:
     - model_name (str): Model name. If None, uses default.
 
     Return Value:
-    - Embeddings: A LangChain-compatible embeddings object.
+    - Embeddings: A LangChain-compatible embeddings object (cached singleton).
 
     Side Effects:
-    - Downloads model on first use.
-
-    Examples:
-    >>> emb = get_embedding_model()
-    >>> isinstance(emb, object)
-    True
+    - Downloads model on first use only, then served from cache.
     """
+    global _EMBEDDING_MODEL_CACHE
+
     if model_name is None:
         model_name = os.getenv(
             "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
         )
 
-    return HuggingFaceEmbeddings(
-        model_name=model_name,
-        model_kwargs={"device": "cpu"},
-        encode_kwargs={"normalize_embeddings": True},
-    )
+    if model_name not in _EMBEDDING_MODEL_CACHE:
+        _EMBEDDING_MODEL_CACHE[model_name] = HuggingFaceEmbeddings(
+            model_name=model_name,
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True},
+            cache_folder="./models_cache",
+        )
+
+    return _EMBEDDING_MODEL_CACHE[model_name]
