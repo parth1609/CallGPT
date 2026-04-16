@@ -357,8 +357,8 @@ def node_answer(state: RAGState):
     search_type = "similarity_search"
     use_reranker = False
     
-    # Use k=2 for small, fast context
-    k = 2
+    # Use k=4 for a more detailed context while still remaining fast
+    k = 4
     
     logger.debug(f"STEP 6: Performing {search_type}, use_reranker={use_reranker}, k={k}")
 
