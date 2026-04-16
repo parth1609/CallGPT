@@ -1,3 +1,13 @@
+# Windows Event Loop Fix: psycopg (async PostgreSQL driver) cannot run on
+# Windows' default ProactorEventLoop. Switch to SelectorEventLoop.
+import sys
+if sys.platform == "win32":
+    import asyncio
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    # Fix Windows console encoding (cp1252 can't handle emoji in print statements)
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # Python 3.13 Compatibility Shim: audioop was removed in 3.13. 
 # We use audioop-lts as a drop-in replacement.
 try:
@@ -119,4 +129,4 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True, loop="asyncio")
