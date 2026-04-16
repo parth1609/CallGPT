@@ -1,7 +1,10 @@
 import React from 'react';
+import { useUser, UserButton, SignInButton, SignUpButton } from '@clerk/clerk-react';
 import './Header.css';
 
 const Header = ({ title }) => {
+    const { isSignedIn, user } = useUser();
+
     return (
         <header className="header">
             <div className="header-content">
@@ -9,8 +12,21 @@ const Header = ({ title }) => {
             </div>
             <div className="header-actions">
                 <div className="header-user">
-                    <span className="user-avatar">👤</span>
-                    <span className="user-name">Admin</span>
+                    {isSignedIn ? (
+                        <div className="user-info">
+                            <span className="user-name">{user?.firstName || 'Admin'}</span>
+                            <UserButton afterSignOutUrl="/sign-in" />
+                        </div>
+                    ) : (
+                        <div className="auth-buttons">
+                            <SignInButton mode="modal">
+                                <button className="sign-in-btn">Sign In</button>
+                            </SignInButton>
+                            <SignUpButton mode="modal">
+                                <button className="sign-up-btn">Sign Up</button>
+                            </SignUpButton>
+                        </div>
+                    )}
                 </div>
             </div>
         </header>
