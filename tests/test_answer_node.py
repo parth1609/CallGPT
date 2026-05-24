@@ -15,12 +15,20 @@ from langchain_core.documents import Document
 
 
 class TestAnswerNode(unittest.IsolatedAsyncioTestCase):
-    @patch("app.modules.pipeline.pipeline.get_retrieval_service")  # Mock get_retrieval_service in pipeline
-    @patch("app.modules.pipeline.pipeline.get_llm_service")  # Mock get_llm_service in pipeline
+    @patch(
+        "app.modules.pipeline.pipeline.get_retrieval_service"
+    )  # Mock get_retrieval_service in pipeline
+    @patch(
+        "app.modules.pipeline.pipeline.get_llm_service"
+    )  # Mock get_llm_service in pipeline
     @patch("app.modules.pipeline.pipeline.get_groq_llm")
     @patch("app.modules.pipeline.pipeline.get_qa_prompt")
     async def test_node_answer(
-        self, mock_get_prompt, mock_get_llm, mock_get_llm_service, mock_get_retrieval_service
+        self,
+        mock_get_prompt,
+        mock_get_llm,
+        mock_get_llm_service,
+        mock_get_retrieval_service,
     ):
         # Setup RetrievalService mock
         mock_retriever_service = mock_get_retrieval_service.return_value
@@ -33,7 +41,10 @@ class TestAnswerNode(unittest.IsolatedAsyncioTestCase):
         mock_retriever_service.similarity_search.return_value = mock_retriever
 
         # Mock retrieve method is no longer needed since similarity_search returns results directly
-        mock_retriever_service.similarity_search.return_value = [{"content": "Answer is in context 1", "metadata": {"source": "test1"}}, {"content": "Answer is in context 2", "metadata": {"source": "test2"}}]
+        mock_retriever_service.similarity_search.return_value = [
+            {"content": "Answer is in context 1", "metadata": {"source": "test1"}},
+            {"content": "Answer is in context 2", "metadata": {"source": "test2"}},
+        ]
 
         # Mock prompt
         mock_prompt = mock_get_prompt.return_value
@@ -41,11 +52,11 @@ class TestAnswerNode(unittest.IsolatedAsyncioTestCase):
 
         # Mock LLM streaming response
         mock_llm = mock_get_llm.return_value
-        
+
         async def mock_stream_chat_async(*args, **kwargs):
             yield {"content": "Hello", "finish_reason": None}
             yield {"content": " World", "finish_reason": "stop"}
-            
+
         mock_llm_service = mock_get_llm_service.return_value
         mock_llm_service.stream_chat_async = mock_stream_chat_async
 
@@ -76,8 +87,6 @@ class TestAnswerNode(unittest.IsolatedAsyncioTestCase):
             use_reranker=False,
             query_embedding=[0.1, 0.2, 0.3],
         )
-
-
 
         # Check results
         self.assertTrue(len(results) > 0, "Should have at least one result")

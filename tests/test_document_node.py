@@ -20,7 +20,8 @@ class TestDocumentServiceNode(unittest.TestCase):
     def test_document_service_node(self, mock_load, mock_service_cls):
         # Setup mocks
         mock_doc = Document(
-            page_content="test content", metadata={"source": "test.txt", "filename": "test.txt"}
+            page_content="test content",
+            metadata={"source": "test.txt", "filename": "test.txt"},
         )
         mock_load.return_value = [mock_doc]
 
@@ -34,8 +35,12 @@ class TestDocumentServiceNode(unittest.TestCase):
         }
 
         # Input - bucket_name is now in state, not a parameter
-        state = RAGState(bucket_name="test-bucket", uploaded_file_path="path/to/test.txt", filename="test.txt")
-    
+        state = RAGState(
+            bucket_name="test-bucket",
+            uploaded_file_path="path/to/test.txt",
+            filename="test.txt",
+        )
+
         # Execute
         result = document_service_node(state)
 
@@ -43,7 +48,9 @@ class TestDocumentServiceNode(unittest.TestCase):
         mock_service_cls.assert_called_with(bucket_name="test-bucket")
         mock_load.assert_called_with("path/to/test.txt")
         mock_service_instance.upload_document.assert_called_with(
-            filename="test.txt", content="test content", metadata={"source": "test.txt", "filename": "test.txt"}
+            filename="test.txt",
+            content="test content",
+            metadata={"source": "test.txt", "filename": "test.txt"},
         )
 
         self.assertEqual(result["content"], "test content")

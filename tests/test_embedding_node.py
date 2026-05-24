@@ -46,7 +46,7 @@ class TestEmbeddingNode(unittest.TestCase):
                 text="test content",
                 chunk_size=100,
                 chunk_overlap=10,
-                model_name="test-model"
+                model_name="test-model",
             )
 
             self.assertEqual(result["embeddings"], mock_embeddings)

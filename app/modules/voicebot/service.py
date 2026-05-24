@@ -24,7 +24,10 @@ logger = logging.getLogger(__name__)
 # Audio conversion utilities
 # ---------------------------------------------------------------------------
 
-def pcm_to_wav(pcm_bytes: bytes, sample_rate: int = 8000, channels: int = 1, sample_width: int = 2) -> bytes:
+
+def pcm_to_wav(
+    pcm_bytes: bytes, sample_rate: int = 8000, channels: int = 1, sample_width: int = 2
+) -> bytes:
     """
     Wrap raw Linear PCM bytes in a WAV header.
 
@@ -46,7 +49,12 @@ def pcm_to_wav(pcm_bytes: bytes, sample_rate: int = 8000, channels: int = 1, sam
     return buf.getvalue()
 
 
-def mp3_to_pcm(mp3_bytes: bytes, target_rate: int = 8000, target_channels: int = 1, target_width: int = 2) -> bytes:
+def mp3_to_pcm(
+    mp3_bytes: bytes,
+    target_rate: int = 8000,
+    target_channels: int = 1,
+    target_width: int = 2,
+) -> bytes:
     """
     Convert MP3 audio bytes to raw Linear PCM (8kHz, 16-bit, mono).
 
@@ -62,21 +70,26 @@ def mp3_to_pcm(mp3_bytes: bytes, target_rate: int = 8000, target_channels: int =
     - Raw PCM audio bytes
     """
     audio = AudioSegment.from_mp3(io.BytesIO(mp3_bytes))
-    audio = audio.set_frame_rate(target_rate).set_channels(target_channels).set_sample_width(target_width)
+    audio = (
+        audio.set_frame_rate(target_rate)
+        .set_channels(target_channels)
+        .set_sample_width(target_width)
+    )
     raw_pcm = audio.raw_data
-    
+
     # Ensure raw PCM length is a multiple of 320 bytes for Exotel compatibility
     remainder = len(raw_pcm) % 320
     if remainder != 0:
-        padding = b'\x00' * (320 - remainder)
+        padding = b"\x00" * (320 - remainder)
         raw_pcm += padding
-        
+
     return raw_pcm
 
 
 # ---------------------------------------------------------------------------
 # Supabase helpers
 # ---------------------------------------------------------------------------
+
 
 def _get_supabase_client() -> Client:
     """Create and return a Supabase client from environment variables."""
@@ -145,13 +158,15 @@ def save_call_log(
     """
     try:
         client = _get_supabase_client()
-        client.table("call_logs").insert({
-            "company_id": company_id,
-            "caller_number": caller_number,
-            "question": question,
-            "answer": answer,
-            "called_at": datetime.now(timezone.utc).isoformat(),
-        }).execute()
+        client.table("call_logs").insert(
+            {
+                "company_id": company_id,
+                "caller_number": caller_number,
+                "question": question,
+                "answer": answer,
+                "called_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ).execute()
         logger.info(f"📞 Call log saved: {caller_number} → company {company_id}")
         return True
     except Exception as e:
@@ -162,6 +177,7 @@ def save_call_log(
 # ---------------------------------------------------------------------------
 # Per-call state manager
 # ---------------------------------------------------------------------------
+
 
 class ExotelCallManager:
     """
@@ -196,9 +212,15 @@ class ExotelCallManager:
         """
         start_payload = data.get("start", data)
 
-        self.stream_sid = start_payload.get("streamSid", start_payload.get("stream_sid", ""))
-        self.caller_number = start_payload.get("from", start_payload.get("caller_number", "unknown"))
-        self.called_number = start_payload.get("to", start_payload.get("called_number", "unknown"))
+        self.stream_sid = start_payload.get(
+            "streamSid", start_payload.get("stream_sid", "")
+        )
+        self.caller_number = start_payload.get(
+            "from", start_payload.get("caller_number", "unknown")
+        )
+        self.called_number = start_payload.get(
+            "to", start_payload.get("called_number", "unknown")
+        )
 
         # Build thread_id from caller number for conversation persistence
         self.thread_id = f"call_{self.caller_number}"
@@ -211,7 +233,9 @@ class ExotelCallManager:
             self.company_id = company["company_id"]
             self.company_name = company["company_name"]
             self.bucket_name = company["bucket_name"]
-            logger.info(f"🏢 Company matched: {self.company_name} (bucket: {self.bucket_name})")
+            logger.info(
+                f"🏢 Company matched: {self.company_name} (bucket: {self.bucket_name})"
+            )
         else:
             # Fallback to default bucket from environment
             self.bucket_name = os.getenv("SUPABASE_BUCKET", "openai-bucket")

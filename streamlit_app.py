@@ -8,7 +8,14 @@ import requests
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage, FunctionMessage
+from langchain_core.messages import (
+    BaseMessage,
+    HumanMessage,
+    AIMessage,
+    SystemMessage,
+    ToolMessage,
+    FunctionMessage,
+)
 import logging as logger
 
 from app.modules.voice.service import VoiceService
@@ -16,6 +23,7 @@ from app.modules.voice.service import VoiceService
 # Optional: pip install audio-recorder-streamlit
 try:
     from audio_recorder_streamlit import audio_recorder
+
     AUDIO_RECORDER_AVAILABLE = True
 except ImportError:
     AUDIO_RECORDER_AVAILABLE = False
@@ -29,7 +37,12 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from app.modules.pipeline.pipeline import customer, checkpointer, _THREAD_RETRIEVERS, _THREAD_METADATA
+from app.modules.pipeline.pipeline import (
+    customer,
+    checkpointer,
+    _THREAD_RETRIEVERS,
+    _THREAD_METADATA,
+)
 
 st.set_page_config(page_title="CallGPT", page_icon="💬", layout="wide")
 
@@ -58,7 +71,8 @@ st.divider()
 def custom_audio_player(audio_bytes: bytes, autoplay: bool = True):
     """Render a compact audio player with tiny play/pause buttons"""
     import base64
-    b64 = base64.b64encode(audio_bytes).decode('utf-8')
+
+    b64 = base64.b64encode(audio_bytes).decode("utf-8")
     autoplay_attr = "autoplay" if autoplay else ""
     html = f"""
         <div style="display: flex; align-items: center; gap: 8px; font-family: sans-serif; margin-top: 5px;">
@@ -75,7 +89,6 @@ def custom_audio_player(audio_bytes: bytes, autoplay: bool = True):
     """
     components.html(html, height=40)
 
- 
 
 # Utilities
 
@@ -114,7 +127,6 @@ def thread_has_document(thread_id) -> bool:
 
 def thread_document_metadata(thread_id) -> dict:
     return _THREAD_METADATA.get(str(thread_id), {})
-
 
 
 def render_org():
@@ -257,29 +269,37 @@ def render_customer():
     # Initialize chat_history if not present
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
-    
+
     # Flag to track if we've loaded history for this thread
     if "history_loaded_for_thread" not in st.session_state:
         st.session_state.history_loaded_for_thread = None
-    
+
     # Load conversation history from database if not already loaded for this thread
     if st.session_state.history_loaded_for_thread != st.session_state.thread_id:
         try:
             # Try to load previous messages from database
-            messages = get_thread_history(st.session_state.thread_id, )
+            messages = get_thread_history(
+                st.session_state.thread_id,
+            )
             if messages:
                 # Convert to chat_history format
                 st.session_state.chat_history = [
-                    {"role": "user" if msg["type"] == "User" else "assistant", 
-                     "content": msg["content"]}
+                    {
+                        "role": "user" if msg["type"] == "User" else "assistant",
+                        "content": msg["content"],
+                    }
                     for msg in messages
                 ]
-                st.info(f"📜 Loaded {len(messages)} previous messages from conversation history")
+                st.info(
+                    f"📜 Loaded {len(messages)} previous messages from conversation history"
+                )
             # Mark that we've loaded history for this thread
             st.session_state.history_loaded_for_thread = st.session_state.thread_id
         except Exception as e:
             # If loading fails (e.g., new thread with no history), just continue
-            logger.debug(f"Could not load history for thread {st.session_state.thread_id}: {e}")
+            logger.debug(
+                f"Could not load history for thread {st.session_state.thread_id}: {e}"
+            )
             st.session_state.history_loaded_for_thread = st.session_state.thread_id
 
     # Sidebar settings
@@ -363,7 +383,11 @@ def render_customer():
                 neutral_color="#6c757d",
                 icon_size="1x",
             )
-            if voice_audio_bytes is not None and len(voice_audio_bytes) > 0 and not user_input:
+            if (
+                voice_audio_bytes is not None
+                and len(voice_audio_bytes) > 0
+                and not user_input
+            ):
                 with st.spinner("🎙️ Transcribing your voice..."):
                     transcribed_text = VoiceService().transcribe(voice_audio_bytes)
                 if transcribed_text:
@@ -408,7 +432,9 @@ def render_customer():
                     # Stream from customer pipeline with async checkpointer
                     events = st.session_state.customer.stream(
                         state,
-                        config={"configurable": {"thread_id": st.session_state.thread_id}},
+                        config={
+                            "configurable": {"thread_id": st.session_state.thread_id}
+                        },
                         stream_mode="updates",
                     )
 

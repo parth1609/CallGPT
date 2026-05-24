@@ -49,8 +49,11 @@ class DocumentService:
 
         if not self.supabase_url or not self.supabase_key:
             import logging
+
             logger = logging.getLogger(__name__)
-            logger.warning("⚠️ Supabase URL or Key not provided. DocumentService will not be functional.")
+            logger.warning(
+                "⚠️ Supabase URL or Key not provided. DocumentService will not be functional."
+            )
             return
 
         self.client: Client = create_client(self.supabase_url, self.supabase_key)
@@ -58,6 +61,7 @@ class DocumentService:
             self._ensure_bucket_exists()
         except Exception as e:
             import logging
+
             logger = logging.getLogger(__name__)
             logger.warning(f"⚠️ Could not ensure bucket exists: {e}")
 
@@ -81,8 +85,11 @@ class DocumentService:
             error_str = str(e)
             if "403" in error_str or "violates row-level security" in error_str.lower():
                 import logging
+
                 logger = logging.getLogger(__name__)
-                logger.info(f"ℹ️ Storage bucket '{self.bucket_name}' check skipped due to restricted permissions. Assuming it exists.")
+                logger.info(
+                    f"ℹ️ Storage bucket '{self.bucket_name}' check skipped due to restricted permissions. Assuming it exists."
+                )
             else:
                 print(f"Bucket check/creation warning: {e}")
 

@@ -21,7 +21,12 @@ from torch.nn import Embedding
 
 # Import utility functions from modules (backend pattern)
 from app.modules.embedding.service import get_embedding_model, EmbeddingService
-from app.modules.llm.service import get_groq_llm, get_qa_prompt, get_llm_service, LLMService
+from app.modules.llm.service import (
+    get_groq_llm,
+    get_qa_prompt,
+    get_llm_service,
+    LLMService,
+)
 from app.modules.document.service import (
     chunk_documents,
     load_text_file,
@@ -42,25 +47,32 @@ from dotenv import load_dotenv
 import uuid
 from langgraph.checkpoint.postgres import PostgresSaver
 
+
 class AsyncWrapperPostgresSaver(PostgresSaver):
     async def aget_tuple(self, config):
         return await asyncio.to_thread(self.get_tuple, config)
 
     async def aput(self, config, checkpoint, metadata, new_versions):
-        return await asyncio.to_thread(self.put, config, checkpoint, metadata, new_versions)
+        return await asyncio.to_thread(
+            self.put, config, checkpoint, metadata, new_versions
+        )
 
     async def alist(self, config, *, filter=None, before=None, limit=None):
         def _get_list():
             return list(self.list(config, filter=filter, before=before, limit=limit))
+
         items = await asyncio.to_thread(_get_list)
         for item in items:
             yield item
 
     async def aput_writes(self, config, writes, task_id, task_path=""):
-        return await asyncio.to_thread(self.put_writes, config, writes, task_id, task_path)
+        return await asyncio.to_thread(
+            self.put_writes, config, writes, task_id, task_path
+        )
 
     async def adelete_thread(self, thread_id):
         return await asyncio.to_thread(self.delete_thread, thread_id)
+
 
 load_dotenv()
 
@@ -74,7 +86,7 @@ if DB_URI:
         # We need to create a connection pool with prepare_threshold=None to disable prepared statements
         # This is necessary when using PostgresSaver to avoid conflicts
         from psycopg_pool import ConnectionPool
-        
+
         # Create connection pool with prepare_threshold=None to disable prepared statements
         pool = ConnectionPool(
             conninfo=DB_URI,
@@ -83,13 +95,15 @@ if DB_URI:
                 "autocommit": True,
                 "prepare_threshold": None,  # Disable prepared statements to avoid conflicts
             },
-            open=True
+            open=True,
         )
-        
+
         # Create PostgresSaver with the connection pool
         checkpointer = AsyncWrapperPostgresSaver(pool)
         checkpointer.setup()  # Initialize the required database tables
-        logger.info("✅ PostgreSQL checkpointer initialized successfully (prepared statements disabled)")
+        logger.info(
+            "✅ PostgreSQL checkpointer initialized successfully (prepared statements disabled)"
+        )
     except Exception as e:
         logger.warning(f"⚠️ Failed to initialize PostgreSQL checkpointer: {e}")
         logger.warning("Conversations will not be persisted to database")
@@ -104,33 +118,36 @@ _THREAD_RETRIEVERS = {}
 _THREAD_METADATA = {}
 
 
-def get_thread_history(thread_id: str, db_uri: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_thread_history(
+    thread_id: str, db_uri: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """
     Retrieve the full conversation history for a specific thread from PostgreSQL checkpointer.
-    
+
     This is a convenience wrapper around ConversationService.get_thread_history that uses
     the global checkpointer instance.
-    
+
     Parameters:
     - thread_id: The specific thread ID to retrieve history for
     - db_uri: PostgreSQL connection string (defaults to DATABASE_URL env variable)
-    
+
     Returns:
     - List of message dictionaries with 'type' and 'content' keys
-    
+
     Example:
         messages = get_thread_history("your_thread_id")
         for msg in messages:
             print(f"{msg['type']}: {msg['content']}")
     """
     from app.modules.conversation.service import ConversationService
-    
+
     # Use global checkpointer if available and no custom db_uri provided
     if checkpointer is not None and db_uri is None:
-        return ConversationService.get_thread_history(thread_id, checkpointer_instance=checkpointer)
+        return ConversationService.get_thread_history(
+            thread_id, checkpointer_instance=checkpointer
+        )
     else:
         return ConversationService.get_thread_history(thread_id, db_uri=db_uri)
-
 
 
 class RAGState(TypedDict, total=False):
@@ -176,7 +193,6 @@ class RAGState(TypedDict, total=False):
     thread_id: Optional[str]  # Thread identifier for conversation tracking
 
     answer: str
-
 
 
 #  LangGraph Nodes
@@ -239,7 +255,7 @@ def embedding_node(state: RAGState):
             text=content,
             chunk_size=state.get("chunk_size", 1000),
             chunk_overlap=state.get("chunk_overlap", 200),
-            model_name=embedding_model
+            model_name=embedding_model,
         )
     except Exception as e:
         raise ValueError(f"Failed to chunk and embed content: {str(e)}")
@@ -344,7 +360,7 @@ async def node_answer(state: RAGState):
 
     # Retrieval service (Module-level singleton to avoid 2-3s setup)
     retriever_service = get_retrieval_service(index_name=index_name)
-    
+
     # LLM Service (Module-level singleton)
     llm_service = get_llm_service()
 
@@ -368,12 +384,12 @@ async def node_answer(state: RAGState):
     # Parallel execution of index check and query embedding
     logger.debug("STEP 4: Getting query embedding and ensuring index in parallel")
     t_parallel_start = time.time()
-    
+
     ensure_task = asyncio.create_task(asyncio.to_thread(_ensure_idx))
     embed_task = asyncio.create_task(asyncio.to_thread(_get_embedding))
-    
+
     _, query_embedding = await asyncio.gather(ensure_task, embed_task)
-    
+
     t_embed = time.time() - t_parallel_start
     logger.debug(
         f"STEP 4 OUTPUT: Query embedding dimension={len(query_embedding) if query_embedding else 0} | ⏱️ {t_embed:.2f}s"
@@ -387,11 +403,13 @@ async def node_answer(state: RAGState):
     # Force search_type=similarity_search and use_reranker=False for sub-3s voicebot speed
     search_type = "similarity_search"
     use_reranker = False
-    
+
     # Use k=4 for a more detailed context while still remaining fast
     k = 4
-    
-    logger.debug(f"STEP 6: Performing {search_type}, use_reranker={use_reranker}, k={k}")
+
+    logger.debug(
+        f"STEP 6: Performing {search_type}, use_reranker={use_reranker}, k={k}"
+    )
 
     if search_type == "similarity_search":
         t_search_start = time.time()
@@ -404,7 +422,9 @@ async def node_answer(state: RAGState):
             query_embedding=query_embedding,
         )
         t_search = time.time() - t_search_start
-        logger.debug(f"STEP 6a OUTPUT: Found {len(search_results)} results | ⏱️ {t_search:.2f}s")
+        logger.debug(
+            f"STEP 6a OUTPUT: Found {len(search_results)} results | ⏱️ {t_search:.2f}s"
+        )
     elif search_type == "mmr_search":
         logger.debug(
             f"STEP 6b: mmr_search with k={state.get('k', 4)}, fetch_k={state.get('fetch_k', 20)}"
@@ -454,9 +474,11 @@ async def node_answer(state: RAGState):
         if d.page_content not in seen_content:
             unique_docs.append(d.page_content)
             seen_content.add(d.page_content)
-    
+
     context = "\n\n".join(unique_docs)
-    logger.debug(f"STEP 8 OUTPUT: Context length={len(context)} characters (deduplicated)")
+    logger.debug(
+        f"STEP 8 OUTPUT: Context length={len(context)} characters (deduplicated)"
+    )
 
     # Create the full message list
     logger.debug("STEP 9: Building message history")
@@ -527,7 +549,6 @@ async def node_answer(state: RAGState):
     logger.debug("NODE: answer - Complete")
     logger.debug("=" * 80)
     yield final_output
-
 
 
 # Organisaton graph

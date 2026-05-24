@@ -82,7 +82,9 @@ class VoiceService:
 
             audio_data = b"".join(mp3_chunks)
             t_tts = time.time() - t_tts_start
-            logger.info(f"✅ Edge TTS (async) success | ⏱️ {t_tts:.2f}s | {len(audio_data)} bytes MP3")
+            logger.info(
+                f"✅ Edge TTS (async) success | ⏱️ {t_tts:.2f}s | {len(audio_data)} bytes MP3"
+            )
         except Exception as e:
             logger.error(f"❌ TTS engine failed: {e}")
             return None

@@ -64,49 +64,48 @@ async def safe_send(ws: WebSocket, data: str) -> bool:
 _sequence_counter = 0
 
 
-async def send_audio_chunks(ws: WebSocket, pcm_bytes: bytes, stream_sid: str, send_mark: bool = False):
+async def send_audio_chunks(
+    ws: WebSocket, pcm_bytes: bytes, stream_sid: str, send_mark: bool = False
+):
     """
     Split PCM audio into 100ms chunks (3200 bytes min) and send to Exotel.
     Optionally sends a 'mark' event after all audio to signal playback complete.
     """
     global _sequence_counter
     CHUNK_SIZE = 3200  # Exotel minimum: 3.2k (100ms at 8kHz 16-bit mono per spec)
-    
+
     for i in range(0, len(pcm_bytes), CHUNK_SIZE):
-        chunk = pcm_bytes[i:i+CHUNK_SIZE]
+        chunk = pcm_bytes[i : i + CHUNK_SIZE]
         # Pad to 320-byte multiple as required by Exotel
         remainder = len(chunk) % 320
         if remainder != 0:
-            chunk += b'\x00' * (320 - remainder)
-        
+            chunk += b"\x00" * (320 - remainder)
+
         b64_payload = base64.b64encode(chunk).decode("utf-8")
         media_event = {
             "event": "media",
             "stream_sid": stream_sid,
-            "media": {
-                "payload": b64_payload
-            }
+            "media": {"payload": b64_payload},
         }
-        
+
         sent = await safe_send(ws, json.dumps(media_event))
         if not sent:
             break
-            
+
         # Small delay between chunks for smooth buffering
         await asyncio.sleep(0.01)
-    
+
     # Send mark event after audio to signal Exotel that bot finished speaking
     if send_mark:
         _sequence_counter += 1
         mark_event = {
             "event": "mark",
             "stream_sid": stream_sid,
-            "mark": {
-                "name": f"bot_response_{_sequence_counter}"
-            }
+            "mark": {"name": f"bot_response_{_sequence_counter}"},
         }
         await safe_send(ws, json.dumps(mark_event))
         logger.info(f"✅ Sent mark event: bot_response_{_sequence_counter}")
+
 
 router = APIRouter()
 
@@ -167,10 +166,11 @@ WS_RECEIVE_TIMEOUT = 300
 def compute_rms(pcm_bytes: bytes) -> float:
     """Compute RMS (root-mean-square) amplitude of 16-bit PCM audio."""
     import struct
+
     if len(pcm_bytes) < 2:
         return 0.0
     n_samples = len(pcm_bytes) // 2
-    samples = struct.unpack(f'<{n_samples}h', pcm_bytes[:n_samples * 2])
+    samples = struct.unpack(f"<{n_samples}h", pcm_bytes[: n_samples * 2])
     if not samples:
         return 0.0
     return (sum(s * s for s in samples) / len(samples)) ** 0.5
@@ -179,6 +179,7 @@ def compute_rms(pcm_bytes: bytes) -> float:
 # ---------------------------------------------------------------------------
 # WebSocket endpoint
 # ---------------------------------------------------------------------------
+
 
 @router.websocket("/voicebot")
 async def exotel_voicebot(ws: WebSocket):
@@ -205,9 +206,9 @@ async def exotel_voicebot(ws: WebSocket):
     is_processing = False
 
     # VAD state tracking
-    has_spoken = False          # True once we detect speech in this turn
-    last_speech_time = 0.0      # Timestamp of last speech-detected chunk
-    vad_triggered = False       # Prevent double-triggering
+    has_spoken = False  # True once we detect speech in this turn
+    last_speech_time = 0.0  # Timestamp of last speech-detected chunk
+    vad_triggered = False  # Prevent double-triggering
 
     async def process_speech():
         """
@@ -238,7 +239,9 @@ async def exotel_voicebot(ws: WebSocket):
                 executor, voice_service.transcribe, wav_bytes
             )
             t_stt = time.time() - t_start
-            logger.info(f"⏱️ STT duration: {t_stt:.2f}s | Text: '{transcribed_text[:100]}'")
+            logger.info(
+                f"⏱️ STT duration: {t_stt:.2f}s | Text: '{transcribed_text[:100]}'"
+            )
 
             if not transcribed_text or not transcribed_text.strip():
                 call.reset_buffer()
@@ -253,9 +256,9 @@ async def exotel_voicebot(ws: WebSocket):
                 while True:
                     try:
                         sentence = await sentence_queue.get()
-                        if sentence is None: # Exit sentinel
+                        if sentence is None:  # Exit sentinel
                             break
-                        
+
                         if not sentence.strip():
                             sentence_queue.task_done()
                             continue
@@ -263,12 +266,16 @@ async def exotel_voicebot(ws: WebSocket):
                         logger.info(f"🔊 Synthesizing: '{sentence[:50]}...'")
                         # Use async TTS directly — no executor/thread overhead
                         pcm_data = await voice_service.speak_async(sentence)
-                        
+
                         if pcm_data:
-                            logger.info(f"📤 Streaming PCM response in chunks | Size: {len(pcm_data)} bytes")
+                            logger.info(
+                                f"📤 Streaming PCM response in chunks | Size: {len(pcm_data)} bytes"
+                            )
                             await send_audio_chunks(ws, pcm_data, call.stream_sid)
-                            logger.info(f"📤 Finished sending PCM chunks | Latency from start: {time.time() - t_start:.2f}s")
-                        
+                            logger.info(
+                                f"📤 Finished sending PCM chunks | Latency from start: {time.time() - t_start:.2f}s"
+                            )
+
                         sentence_queue.task_done()
                     except Exception as e:
                         logger.error(f"Error in audio_worker: {e}")
@@ -276,7 +283,7 @@ async def exotel_voicebot(ws: WebSocket):
 
             # 4. Stream the pipeline
             worker_task = asyncio.create_task(audio_worker())
-            
+
             try:
                 state = {
                     "question": transcribed_text,
@@ -286,9 +293,11 @@ async def exotel_voicebot(ws: WebSocket):
                     **VOICE_PIPELINE_DEFAULTS,
                 }
                 config = {"configurable": {"thread_id": call.thread_id}}
-                
+
                 buffer = ""
-                async for chunk in _voicebot_pipeline.astream(state, config, stream_mode="messages"):
+                async for chunk in _voicebot_pipeline.astream(
+                    state, config, stream_mode="messages"
+                ):
                     # Only process AI response chunks — skip HumanMessage/SystemMessage
                     if isinstance(chunk, tuple) and len(chunk) > 1:
                         msg = chunk[0]
@@ -300,9 +309,12 @@ async def exotel_voicebot(ws: WebSocket):
                             content = msg.content
                             buffer += content
                             full_answer.append(content)
-                            
+
                             # Trigger sentence when punctuation or buffer length is reached
-                            if any(p in content for p in [".", "?", "!", "\n"]) or len(buffer) > 40:
+                            if (
+                                any(p in content for p in [".", "?", "!", "\n"])
+                                or len(buffer) > 40
+                            ):
                                 if buffer.strip():
                                     await sentence_queue.put(buffer.strip())
                                     buffer = ""
@@ -325,7 +337,9 @@ async def exotel_voicebot(ws: WebSocket):
             logger.error(f"Streaming pipeline error: {e}", exc_info=True)
             # Fallback error message
             try:
-                await sentence_queue.put("I am sorry, I encountered an error. Please try again.")
+                await sentence_queue.put(
+                    "I am sorry, I encountered an error. Please try again."
+                )
                 await sentence_queue.put(None)
                 await worker_task
             except:
@@ -343,7 +357,10 @@ async def exotel_voicebot(ws: WebSocket):
     try:
         while True:
             # Check if WebSocket is still alive
-            if ws.client_state != WebSocketState.CONNECTED or ws.application_state == WebSocketState.DISCONNECTED:
+            if (
+                ws.client_state != WebSocketState.CONNECTED
+                or ws.application_state == WebSocketState.DISCONNECTED
+            ):
                 logger.warning("WebSocket no longer connected — exiting loop")
                 break
 
@@ -388,17 +405,27 @@ async def exotel_voicebot(ws: WebSocket):
                 # If stream_sid is missing, try extracting from top-level data
                 if not call.stream_sid:
                     call.stream_sid = data.get("stream_sid", data.get("streamSid", ""))
-                    logger.warning(f"⚠️ stream_sid was empty, retried from top-level: '{call.stream_sid}'")
+                    logger.warning(
+                        f"⚠️ stream_sid was empty, retried from top-level: '{call.stream_sid}'"
+                    )
 
                 # Generate greeting on first call if not cached yet
                 global _cached_greeting_pcm_b64
                 if not _cached_greeting_pcm_b64:
-                    logger.info("⏳ Generating greeting audio (first call — async TTS)...")
+                    logger.info(
+                        "⏳ Generating greeting audio (first call — async TTS)..."
+                    )
                     try:
-                        greeting_pcm_raw = await voice_service.speak_async(GREETING_TEXT)
+                        greeting_pcm_raw = await voice_service.speak_async(
+                            GREETING_TEXT
+                        )
                         if greeting_pcm_raw:
-                            _cached_greeting_pcm_b64 = base64.b64encode(greeting_pcm_raw).decode("utf-8")
-                            logger.info(f"✅ Greeting audio cached ({len(greeting_pcm_raw)} bytes PCM)")
+                            _cached_greeting_pcm_b64 = base64.b64encode(
+                                greeting_pcm_raw
+                            ).decode("utf-8")
+                            logger.info(
+                                f"✅ Greeting audio cached ({len(greeting_pcm_raw)} bytes PCM)"
+                            )
                         else:
                             logger.warning("⚠️ Greeting TTS returned no audio")
                     except Exception as e:
@@ -407,8 +434,12 @@ async def exotel_voicebot(ws: WebSocket):
                 # Send greeting
                 if _cached_greeting_pcm_b64 and call.stream_sid:
                     greeting_pcm = base64.b64decode(_cached_greeting_pcm_b64)
-                    logger.info(f"👋 Sending greeting audio | {len(greeting_pcm)} bytes PCM")
-                    await send_audio_chunks(ws, greeting_pcm, call.stream_sid, send_mark=True)
+                    logger.info(
+                        f"👋 Sending greeting audio | {len(greeting_pcm)} bytes PCM"
+                    )
+                    await send_audio_chunks(
+                        ws, greeting_pcm, call.stream_sid, send_mark=True
+                    )
                     logger.info("👋 Finished sending greeting audio + mark")
                 elif not call.stream_sid:
                     logger.warning("⚠️ No stream_sid — cannot send greeting")
@@ -485,5 +516,3 @@ async def exotel_voicebot(ws: WebSocket):
         except Exception:
             pass
         logger.info("🔌 Exotel WebSocket closed")
-
-

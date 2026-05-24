@@ -473,4 +473,3 @@ def build_supabase_from_documents(
     service.table_name = table_name
     service.query_name = query_name
     return service.upsert_documents(docs)
-

@@ -208,7 +208,7 @@ def get_embedding_model(model_name: str = None):
         model_name = os.getenv(
             "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
         )
-    
+
     # Automatically detect available hardware
     device_name = "cuda:0" if torch.cuda.is_available() else "cpu"
 

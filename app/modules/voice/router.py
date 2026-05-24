@@ -28,7 +28,9 @@ async def health_check():
 
 
 @router.post("/transcribe", response_model=TranscribeResponse)
-async def transcribe_audio(file: UploadFile = File(..., description="Audio file (WAV, MP3, etc.)")):
+async def transcribe_audio(
+    file: UploadFile = File(..., description="Audio file (WAV, MP3, etc.)"),
+):
     """
     Transcribe an audio file to text using Groq Whisper API.
 

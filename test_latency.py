@@ -2,18 +2,19 @@ import requests
 import time
 import sys
 
+
 def test_query(question):
     url = "http://localhost:8000/api/v1/pipeline/customer/query"
     payload = {
         "bucket_name": "openai-bucket",
         "question": question,
         "thread_id": "latency-test",
-        "embeddings_model": "sentence-transformers/all-MiniLM-L6-v2"
+        "embeddings_model": "sentence-transformers/all-MiniLM-L6-v2",
     }
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Query: '{question}'")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     start_time = time.time()
 
@@ -52,6 +53,6 @@ if __name__ == "__main__":
     elapsed = test_query(question)
 
     if elapsed is not None:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Total response time: {elapsed:.2f} seconds")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")

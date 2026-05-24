@@ -15,9 +15,13 @@ class CallLogEntry(BaseModel):
     company_id: Optional[str] = Field(default=None, description="Company UUID")
     company_name: Optional[str] = Field(default=None, description="Company name")
     caller_number: str = Field(..., description="Farmer's phone number")
-    question: Optional[str] = Field(default=None, description="Transcribed farmer utterance")
+    question: Optional[str] = Field(
+        default=None, description="Transcribed farmer utterance"
+    )
     answer: Optional[str] = Field(default=None, description="AI-generated response")
-    called_at: Optional[datetime] = Field(default=None, description="When the call was made")
+    called_at: Optional[datetime] = Field(
+        default=None, description="When the call was made"
+    )
 
 
 class CallLogsResponse(BaseModel):
@@ -31,14 +35,26 @@ class CallLogsResponse(BaseModel):
 class ActiveCallInfo(BaseModel):
     """Information about a currently active WebSocket call"""
 
-    stream_sid: Optional[str] = Field(default=None, description="Exotel stream session ID")
-    caller_number: Optional[str] = Field(default=None, description="Farmer's phone number")
-    called_number: Optional[str] = Field(default=None, description="Exotel number dialed")
-    company_name: Optional[str] = Field(default=None, description="Matched company name")
+    stream_sid: Optional[str] = Field(
+        default=None, description="Exotel stream session ID"
+    )
+    caller_number: Optional[str] = Field(
+        default=None, description="Farmer's phone number"
+    )
+    called_number: Optional[str] = Field(
+        default=None, description="Exotel number dialed"
+    )
+    company_name: Optional[str] = Field(
+        default=None, description="Matched company name"
+    )
     bucket_name: Optional[str] = Field(default=None, description="Vector store bucket")
     thread_id: Optional[str] = Field(default=None, description="Conversation thread ID")
-    turn_count: int = Field(default=0, description="Number of conversation turns so far")
-    connected_at: Optional[datetime] = Field(default=None, description="When the call connected")
+    turn_count: int = Field(
+        default=0, description="Number of conversation turns so far"
+    )
+    connected_at: Optional[datetime] = Field(
+        default=None, description="When the call connected"
+    )
 
 
 class ActiveCallsResponse(BaseModel):
@@ -56,7 +72,9 @@ class CompanyInfo(BaseModel):
     company_name: str = Field(..., description="Company name")
     bucket_name: str = Field(..., description="Vector store bucket name")
     exotel_number: str = Field(..., description="Exotel phone number")
-    created_at: Optional[datetime] = Field(default=None, description="When the company was created")
+    created_at: Optional[datetime] = Field(
+        default=None, description="When the company was created"
+    )
 
 
 class CompanyListResponse(BaseModel):

@@ -14,21 +14,20 @@ if not url or not key:
 # Clean URL
 url = url.strip().rstrip("/")
 
-headers = {
-    "apikey": key,
-    "Authorization": f"Bearer {key}"
-}
+headers = {"apikey": key, "Authorization": f"Bearer {key}"}
 
 try:
     with httpx.Client() as client:
         response = client.get(f"{url}/rest/v1/companies?select=*", headers=headers)
         response.raise_for_status()
         data = response.json()
-        
+
         if data:
             print(f"✅ Found {len(data)} companies in database:")
             for row in data:
-                print(f"- '{row.get('company_name')}' | Number: '{row.get('exotel_number')}' | Bucket: '{row.get('bucket_name')}'")
+                print(
+                    f"- '{row.get('company_name')}' | Number: '{row.get('exotel_number')}' | Bucket: '{row.get('bucket_name')}'"
+                )
         else:
             print("❌ No companies found in the 'companies' table.")
 except Exception as e:
