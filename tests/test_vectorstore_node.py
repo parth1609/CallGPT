@@ -21,12 +21,12 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 sys.modules["pinecone"] = MagicMock()
 sys.modules["supabase"] = MagicMock()
 
-from app.pipeline import node_vectorstore, RAGState
+from app.modules.pipeline.pipeline import node_vectorstore, RAGState
 from langchain_core.documents import Document
 
 
 class TestVectorStoreNode(unittest.TestCase):
-    @patch("app.pipeline.VectorStoreService")
+    @patch("app.modules.pipeline.pipeline.VectorStoreService")
     def test_node_vectorstore(self, MockVectorStoreService):
         # Setup
         mock_service = MockVectorStoreService.return_value

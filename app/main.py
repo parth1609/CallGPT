@@ -69,13 +69,12 @@ async def lifespan(app: FastAPI):
             "messages": [],
             "bucket_name": "openai-bucket"
         }
-        await asyncio.to_thread(
-            lambda: list(_voicebot_pipeline.stream(
-                dummy_state, 
-                config={"configurable": {"thread_id": "warmup"}},
-                stream_mode="updates"
-            ))
-        )
+        async for _ in _voicebot_pipeline.astream(
+            dummy_state, 
+            config={"configurable": {"thread_id": "warmup"}},
+            stream_mode="updates"
+        ):
+            pass
         print("✅ [Startup] Pipeline execution warmed up")
         
     except Exception as e:

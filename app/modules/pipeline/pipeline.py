@@ -1,6 +1,7 @@
 import os
 import time
 import logging
+import asyncio
 
 # Force HuggingFace offline mode BEFORE any transformers/sentence-transformers imports.
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -291,7 +292,7 @@ def node_vectorstore(state: RAGState) -> Dict[str, Any]:
     return {}
 
 
-def node_answer(state: RAGState):
+async def node_answer(state: RAGState):
     """Retrieve documents and generate answer with streaming from pinecone vector store"""
     logger.debug("=" * 80)
     logger.debug("NODE: answer - Starting")
@@ -321,15 +322,6 @@ def node_answer(state: RAGState):
 
     logger.debug(f"STEP 0a: Index dimension={dimension} for model={embeddings_model}")
 
-    try:
-        # Create temporary VectorStoreService instance to ensure index
-        vector_service = VectorStoreService()
-        vector_service._ensure_index(index_name, dimension)
-        logger.debug(f"STEP 0 OUTPUT: Index '{index_name}' ready")
-    except Exception as e:
-        logger.warning(f"STEP 0 WARNING: Could not ensure index: {str(e)}")
-        # Continue anyway - index might exist but check failed
-
     # Retrieval service (Module-level singleton to avoid 2-3s setup)
     retriever_service = get_retrieval_service(index_name=index_name)
     
@@ -339,13 +331,30 @@ def node_answer(state: RAGState):
     query = state.get("question")
     logger.debug(f"STEP 3: Query extracted: {query[:100] if query else None}...")
 
-    # Get query embedding (Cached model)
-    logger.debug("STEP 4: Getting query embedding")
-    t_embed_start = time.time()
-    query_embedding = retriever_service._get_query_embedding(
-        query, model_name=state.get("embeddings_model")
-    )
-    t_embed = time.time() - t_embed_start
+    # Define tasks for parallel execution
+    def _ensure_idx():
+        try:
+            vector_service = VectorStoreService()
+            vector_service._ensure_index(index_name, dimension)
+            logger.debug(f"STEP 0 OUTPUT: Index '{index_name}' ready")
+        except Exception as e:
+            logger.warning(f"STEP 0 WARNING: Could not ensure index: {str(e)}")
+
+    def _get_embedding():
+        return retriever_service._get_query_embedding(
+            query, model_name=state.get("embeddings_model")
+        )
+
+    # Parallel execution of index check and query embedding
+    logger.debug("STEP 4: Getting query embedding and ensuring index in parallel")
+    t_parallel_start = time.time()
+    
+    ensure_task = asyncio.create_task(asyncio.to_thread(_ensure_idx))
+    embed_task = asyncio.create_task(asyncio.to_thread(_get_embedding))
+    
+    _, query_embedding = await asyncio.gather(ensure_task, embed_task)
+    
+    t_embed = time.time() - t_parallel_start
     logger.debug(
         f"STEP 4 OUTPUT: Query embedding dimension={len(query_embedding) if query_embedding else 0} | ⏱️ {t_embed:.2f}s"
     )
@@ -366,11 +375,13 @@ def node_answer(state: RAGState):
 
     if search_type == "similarity_search":
         t_search_start = time.time()
-        search_results = retriever_service.similarity_search(
+        search_results = await asyncio.to_thread(
+            retriever_service.similarity_search,
             query=query,
             k=k,
             embedding_model=state.get("embeddings_model"),
             use_reranker=use_reranker,
+            query_embedding=query_embedding,
         )
         t_search = time.time() - t_search_start
         logger.debug(f"STEP 6a OUTPUT: Found {len(search_results)} results | ⏱️ {t_search:.2f}s")
@@ -378,25 +389,29 @@ def node_answer(state: RAGState):
         logger.debug(
             f"STEP 6b: mmr_search with k={state.get('k', 4)}, fetch_k={state.get('fetch_k', 20)}"
         )
-        search_results = retriever_service.mmr_search(
+        search_results = await asyncio.to_thread(
+            retriever_service.mmr_search,
             text_query=query,
             k=state.get("k", 4),
             fetch_k=state.get("fetch_k", 20),
             lambda_mult=state.get("lambda_mult", 0.5),
             embedding_model=state.get("embeddings_model"),
+            query_embedding=query_embedding,
         )
         logger.debug(f"STEP 6b OUTPUT: Found {len(search_results)} results")
     else:
         logger.warning(
             f"Unknown search_type: {search_type}, defaulting to similarity_search"
         )
-        search_results = retriever_service.similarity_search(
+        search_results = await asyncio.to_thread(
+            retriever_service.similarity_search,
             query=query,
             k=state.get("k", 4),
             embedding_model=state.get("embeddings_model"),
             use_reranker=use_reranker,
             fetch_k=state.get("fetch_k", 20),
             reranker_model=state.get("reranker_model", "bge-reranker-v2-m3"),
+            query_embedding=query_embedding,
         )
 
     # Convert search results to Document objects
@@ -457,7 +472,7 @@ def node_answer(state: RAGState):
     t_first_token = None
     answer_accum = ""
     chunk_count = 0
-    for chunk in llm_service.stream_chat(
+    async for chunk in llm_service.stream_chat_async(
         messages=messages_dict,
         model=state.get("llm_model", "llama-3.3-70b-versatile"),
         temperature=state.get("temperature", 0.5),

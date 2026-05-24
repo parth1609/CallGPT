@@ -153,7 +153,7 @@ class PipelineService:
 
         return result
 
-    def query_documents(
+    async def query_documents(
         self,
         bucket_name: str,
         question: str,
@@ -214,11 +214,11 @@ class PipelineService:
         }
 
         # Execute workflow and get final result
-        result = self.customer_pipeline.invoke(state)
+        result = await self.customer_pipeline.ainvoke(state)
 
         return result
 
-    def stream_query(
+    async def stream_query(
         self,
         bucket_name: str,
         question: str,
@@ -269,5 +269,5 @@ class PipelineService:
         }
 
         # Stream results from pipeline
-        for chunk in self.customer_pipeline.stream(state):
+        async for chunk in self.customer_pipeline.astream(state):
             yield chunk

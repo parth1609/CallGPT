@@ -4,8 +4,8 @@ Handles chat completion with various LLM providers.
 """
 
 import os
-from typing import List, Dict, Any, Iterator
-from groq import Groq
+from typing import List, Dict, Any, Iterator, AsyncIterator
+from groq import Groq, AsyncGroq
 from dotenv import load_dotenv
 
 
@@ -33,6 +33,7 @@ class LLMService:
             raise ValueError("GROQ_API_KEY must be set")
 
         self.groq_client = Groq(api_key=self.groq_api_key)
+        self.async_groq_client = AsyncGroq(api_key=self.groq_api_key)
 
     def chat(
         self,
@@ -116,6 +117,49 @@ class LLMService:
         )
 
         for chunk in stream:
+            delta = chunk.choices[0].delta
+            finish_reason = chunk.choices[0].finish_reason
+
+            if delta.content:
+                yield {
+                    "content": delta.content,
+                    "finish_reason": finish_reason,
+                }
+
+    async def stream_chat_async(
+        self,
+        messages: List[Dict[str, str]],
+        model: str = None,
+        temperature: float = 0.5,
+        max_tokens: int = None,
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """
+        Stream chat completion asynchronously.
+
+        Parameters:
+        - messages: List of message dicts
+        - model: Model name
+        - temperature: Sampling temperature
+        - max_tokens: Maximum tokens
+
+        Yields:
+        - Dicts with content chunks and finish_reason
+        """
+        model = model or self.default_model
+
+        groq_messages = [
+            {"role": msg["role"], "content": msg["content"]} for msg in messages
+        ]
+
+        stream = await self.async_groq_client.chat.completions.create(
+            model=model,
+            messages=groq_messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+
+        async for chunk in stream:
             delta = chunk.choices[0].delta
             finish_reason = chunk.choices[0].finish_reason
 

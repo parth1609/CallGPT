@@ -61,11 +61,11 @@ class EmbeddingService:
         # across all instances of EmbeddingService and the overall application.
         get_embedding_model(self.default_model)
 
-    # def _get_embedding_model(self, model_name: str = None):
-    #     """
-    #     Get or create embedding model instance (wrapper for global singleton).
-    #     """
-    #     return get_embedding_model(model_name or self.default_model)
+    def _get_embedding_model(self, model_name: str = None):
+        """
+        Get or create embedding model instance (wrapper for global singleton).
+        """
+        return get_embedding_model(model_name or self.default_model)
 
     def chunk_text(
         self,

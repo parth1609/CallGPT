@@ -180,6 +180,7 @@ class RetrievalService:
         use_reranker: bool = False,
         fetch_k: int = 20,
         reranker_model: str = "bge-reranker-v2-m3",
+        query_embedding: Optional[List[float]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Perform similarity search using Pinecone with LangChain.
@@ -219,8 +220,9 @@ class RetrievalService:
             )
 
         # Standard similarity search (existing implementation)
-        # Get query embedding from embedding service
-        query_embedding = self._get_query_embedding(query, embedding_model)
+        # Get query embedding from embedding service if not provided
+        if query_embedding is None:
+            query_embedding = self._get_query_embedding(query, embedding_model)
 
         # Perform similarity search using Pinecone
         # Use query_by_vector for direct embedding search
@@ -262,6 +264,7 @@ class RetrievalService:
         lambda_mult: float = 0.5,
         threshold: float = 0.5,
         embedding_model: Optional[str] = None,
+        query_embedding: Optional[List[float]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Perform Maximum Marginal Relevance (MMR) search using Pinecone.
@@ -279,8 +282,9 @@ class RetrievalService:
         Returns:
         - List of diverse, relevant results
         """
-        # Get query embedding
-        query_embedding = self._get_query_embedding(text_query, embedding_model)
+        # Get query embedding if not provided
+        if query_embedding is None:
+            query_embedding = self._get_query_embedding(text_query, embedding_model)
 
         # Fetch more candidates than needed for MMR
         try:

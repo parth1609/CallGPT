@@ -197,7 +197,7 @@ async def query_documents(request: CustomerQueryRequest):
     """
     try:
         # Query through service layer
-        result = pipeline_service.query_documents(
+        result = await pipeline_service.query_documents(
             bucket_name=request.bucket_name,
             question=request.question,
             embeddings_model=request.embeddings_model,
