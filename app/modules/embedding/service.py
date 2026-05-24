@@ -61,11 +61,11 @@ class EmbeddingService:
         # across all instances of EmbeddingService and the overall application.
         get_embedding_model(self.default_model)
 
-    def _get_embedding_model(self, model_name: str = None):
-        """
-        Get or create embedding model instance (wrapper for global singleton).
-        """
-        return get_embedding_model(model_name or self.default_model)
+    # def _get_embedding_model(self, model_name: str = None):
+    #     """
+    #     Get or create embedding model instance (wrapper for global singleton).
+    #     """
+    #     return get_embedding_model(model_name or self.default_model)
 
     def chunk_text(
         self,
@@ -183,6 +183,8 @@ class EmbeddingService:
 # Ensures the HuggingFace model is loaded exactly ONCE across all pipeline calls.
 _EMBEDDING_MODEL_CACHE: dict = {}
 
+import torch
+
 
 def get_embedding_model(model_name: str = None):
     """
@@ -206,11 +208,14 @@ def get_embedding_model(model_name: str = None):
         model_name = os.getenv(
             "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
         )
+    
+    # Automatically detect available hardware
+    device_name = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     if model_name not in _EMBEDDING_MODEL_CACHE:
         _EMBEDDING_MODEL_CACHE[model_name] = HuggingFaceEmbeddings(
             model_name=model_name,
-            model_kwargs={"device": "cpu"},
+            model_kwargs={"device": device_name},
             encode_kwargs={"normalize_embeddings": True},
             cache_folder="./models_cache",
         )

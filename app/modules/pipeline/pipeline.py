@@ -214,9 +214,11 @@ def embedding_node(state: RAGState):
     # Unpack the tuple returned by chunk_and_embed
     # Returns: (chunks, embeddings, model_name, total_chunks)
     try:
-        chunks_text = Embedding_Service.chunk_text(text=state.get("content"))
-        all_embeddings, _, dimension = Embedding_Service.generate_embeddings(
-            texts=chunks_text, model_name=embedding_model
+        chunks_text, all_embeddings, _, dimension = Embedding_Service.chunk_and_embed(
+            text=content,
+            chunk_size=state.get("chunk_size", 1000),
+            chunk_overlap=state.get("chunk_overlap", 200),
+            model_name=embedding_model
         )
     except Exception as e:
         raise ValueError(f"Failed to chunk and embed content: {str(e)}")
