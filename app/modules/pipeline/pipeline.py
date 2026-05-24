@@ -42,6 +42,26 @@ from dotenv import load_dotenv
 import uuid
 from langgraph.checkpoint.postgres import PostgresSaver
 
+class AsyncWrapperPostgresSaver(PostgresSaver):
+    async def aget_tuple(self, config):
+        return await asyncio.to_thread(self.get_tuple, config)
+
+    async def aput(self, config, checkpoint, metadata, new_versions):
+        return await asyncio.to_thread(self.put, config, checkpoint, metadata, new_versions)
+
+    async def alist(self, config, *, filter=None, before=None, limit=None):
+        def _get_list():
+            return list(self.list(config, filter=filter, before=before, limit=limit))
+        items = await asyncio.to_thread(_get_list)
+        for item in items:
+            yield item
+
+    async def aput_writes(self, config, writes, task_id, task_path=""):
+        return await asyncio.to_thread(self.put_writes, config, writes, task_id, task_path)
+
+    async def adelete_thread(self, thread_id):
+        return await asyncio.to_thread(self.delete_thread, thread_id)
+
 load_dotenv()
 
 # Global variables for checkpointer and thread tracking
@@ -67,7 +87,7 @@ if DB_URI:
         )
         
         # Create PostgresSaver with the connection pool
-        checkpointer = PostgresSaver(pool)
+        checkpointer = AsyncWrapperPostgresSaver(pool)
         checkpointer.setup()  # Initialize the required database tables
         logger.info("✅ PostgreSQL checkpointer initialized successfully (prepared statements disabled)")
     except Exception as e:

@@ -214,7 +214,8 @@ class PipelineService:
         }
 
         # Execute workflow and get final result
-        result = await self.customer_pipeline.ainvoke(state)
+        config = {"configurable": {"thread_id": thread_id or "default"}}
+        result = await self.customer_pipeline.ainvoke(state, config=config)
 
         return result
 
@@ -269,5 +270,6 @@ class PipelineService:
         }
 
         # Stream results from pipeline
-        async for chunk in self.customer_pipeline.astream(state):
+        config = {"configurable": {"thread_id": thread_id or "default"}}
+        async for chunk in self.customer_pipeline.astream(state, config=config):
             yield chunk
