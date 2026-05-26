@@ -9,6 +9,7 @@ dependencies = [
     "audioop-lts>=0.2.2",
     "edge-tts>=7.2.8",
     "fastapi>=0.121.1",
+    "flake8>=7.3.0",
     "groq>=0.34.0",
     "httpx>=0.28.1",
     "langchain>=1.0.5",

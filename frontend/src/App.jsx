@@ -3,9 +3,9 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ClerkProvider, SignIn, SignUp } from '@clerk/clerk-react';
 import MainLayout from './layout/MainLayout';
 import CallLogs from './pages/CallLogs';
-import VoiceBotSetup from './pages/VoiceBotSetup';
+// import VoiceBotSetup from './pages/VoiceBotSetup';
 import DocumentUploadPage from './pages/DocumentUploadPage';
-import Settings from './pages/Settings';
+// import Settings from './pages/Settings';
 import ProtectedRoute from './components/ProtectedRoute';
 import './App.css';
 
@@ -26,9 +26,9 @@ function App() {
           <Route path="/" element={<MainLayout />}>
             <Route index element={<ProtectedRoute><CallLogs /></ProtectedRoute>} />
             <Route path="call-logs" element={<ProtectedRoute><CallLogs /></ProtectedRoute>} />
-            <Route path="voice-bot-setup" element={<ProtectedRoute><VoiceBotSetup /></ProtectedRoute>} />
+            {/* <Route path="voice-bot-setup" element={<ProtectedRoute><VoiceBotSetup /></ProtectedRoute>} /> */}
             <Route path="document-upload" element={<ProtectedRoute><DocumentUploadPage /></ProtectedRoute>} />
-            <Route path="settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+            {/* <Route path="settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} /> */}
           </Route>
         </Routes>
       </Router>

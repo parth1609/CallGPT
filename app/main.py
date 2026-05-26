@@ -38,6 +38,8 @@ from app.modules.document.router import router as document_router
 from app.modules.vectorstore.router import router as vectorstore_router
 from app.modules.pipeline.router import router as pipeline_router
 from app.modules.voicebot.router import router as voicebot_router
+from app.modules.voice.router import router as voice_router
+
 
 from contextlib import asynccontextmanager
 
@@ -135,8 +137,12 @@ app.include_router(
 )
 app.include_router(pipeline_router, prefix="/api/v1/pipeline", tags=["Pipeline"])
 app.include_router(
+    voice_router, prefix="/api/v1/voice", tags=["Voice"]
+)
+app.include_router(
     voicebot_router
 )  # No prefix for the main voicebot WebSocket endpoint
+
 
 
 @app.get("/health")
