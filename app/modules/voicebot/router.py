@@ -231,16 +231,21 @@ async def exotel_voicebot(ws: WebSocket):
             await safe_send(ws, json.dumps(clear_event))
             logger.info("📡 Sent 'clear' event to Exotel")
 
-            # 2. Transcribe (STT)
+            # 2. Transcribe (STT) — auto-detects language on first turn
             t_start = time.time()
             wav_bytes = call.get_wav_bytes()
             logger.info(f"🎤 Transcribing {len(wav_bytes)} bytes...")
-            transcribed_text = await asyncio.get_event_loop().run_in_executor(
-                executor, voice_service.transcribe, wav_bytes
+            result = await asyncio.get_event_loop().run_in_executor(
+                executor, voice_service.transcribe, wav_bytes, call.language
             )
+            transcribed_text, detected_lang = result
+            # Persist detected language for this call's subsequent turns + TTS
+            if detected_lang and not call.language:
+                call.language = detected_lang
+                logger.info(f"🌐 Language set for call: '{call.language}'")
             t_stt = time.time() - t_start
             logger.info(
-                f"⏱️ STT duration: {t_stt:.2f}s | Text: '{transcribed_text[:100]}'"
+                f"⏱️ STT duration: {t_stt:.2f}s | Lang: {detected_lang} | Text: '{transcribed_text[:100] if transcribed_text else ''}'"
             )
 
             if not transcribed_text or not transcribed_text.strip():
@@ -263,9 +268,11 @@ async def exotel_voicebot(ws: WebSocket):
                             sentence_queue.task_done()
                             continue
 
-                        logger.info(f"🔊 Synthesizing: '{sentence[:50]}...'")
-                        # Use async TTS directly — no executor/thread overhead
-                        pcm_data = await voice_service.speak_async(sentence)
+                        logger.info(f"🔊 Synthesizing ({call.language}): '{sentence[:50]}...'")
+                        # Use async TTS with detected language
+                        pcm_data = await voice_service.speak_async(
+                            sentence, language=call.language or "en"
+                        )
 
                         if pcm_data:
                             logger.info(

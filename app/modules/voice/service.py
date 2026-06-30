@@ -2,8 +2,9 @@
 Purpose: Business logic for Voice Service.
 Handles Speech-to-Text (STT) and Text-to-Speech (TTS) with multi-language support.
 
-English  → Groq API  (Whisper STT) + Edge TTS
-Hindi/Marathi → Sarvam AI (Saaras v3 STT + Bulbul v3 TTS)
+English      → Groq Whisper (STT) + Edge TTS
+Hindi/Marathi → Groq Whisper auto-detect (STT) + Edge TTS (regional voice)
+               Falls back to Sarvam AI if SARVAM_API_KEY is set.
 """
 
 import os
@@ -12,7 +13,7 @@ import base64
 import logging
 import time
 import io
-from typing import Optional
+from typing import Optional, Tuple
 from dotenv import load_dotenv
 from groq import Groq
 from pydub import AudioSegment
@@ -23,10 +24,15 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# ── Edge TTS Configuration (English) ──────────────────────────────────
-EDGE_TTS_VOICE = "en-US-AndrewMultilingualNeural"  # Natural male voice
+# ── Edge TTS Voice Configuration ──────────────────────────────────────
+EDGE_TTS_VOICES = {
+    "en": "en-US-AndrewMultilingualNeural",   # English male
+    "hi": "hi-IN-MadhurNeural",               # Hindi male
+    "mr": "mr-IN-ManoharNeural",              # Marathi male
+}
+EDGE_TTS_DEFAULT_VOICE = "en-US-AndrewMultilingualNeural"
 
-# ── Sarvam Configuration (Hindi / Marathi) ────────────────────────────
+# ── Sarvam Configuration (Hindi / Marathi — optional) ─────────────────
 SARVAM_API_BASE = "https://api.sarvam.ai"
 SARVAM_TTS_MODEL = "bulbul:v3"
 SARVAM_STT_MODEL = "saaras:v3"
@@ -34,84 +40,143 @@ SARVAM_DEFAULT_SPEAKER = "shubh"
 
 # Language code mapping for Sarvam API
 SARVAM_LANGUAGE_CODES = {
+    "en": "en-IN",
     "hi": "hi-IN",
     "mr": "mr-IN",
 }
 
-# Languages handled by Sarvam (everything else falls through to Edge TTS)
-SARVAM_LANGUAGES = {"hi", "mr"}
+# Languages handled by Sarvam (when API key is available)
+SARVAM_LANGUAGES = {"en", "hi", "mr"}
 
 
 class VoiceService:
     """Manages voice operations with language-aware routing.
 
-    - English (en): Groq Whisper (STT) + Edge TTS
-    - Hindi  (hi): Sarvam Saaras (STT) + Sarvam Bulbul (TTS)
-    - Marathi(mr): Sarvam Saaras (STT) + Sarvam Bulbul (TTS)
+    STT (Speech-to-Text):
+    - All languages: Sarvam Saaras v3 STT (auto-detects English, Hindi, and Marathi).
+      If SARVAM_API_KEY is missing, falls back to Groq Whisper.
+
+    TTS (Text-to-Speech):
+    - English (en): Edge TTS (en-US-AndrewMultilingualNeural)
+    - Hindi  (hi): Edge TTS (hi-IN-MadhurNeural) — or Sarvam Bulbul if key set
+    - Marathi(mr): Edge TTS (mr-IN-ManoharNeural) — or Sarvam Bulbul if key set
     """
 
     def __init__(self):
         """Initialize Voice Service with Groq and Sarvam clients."""
-        # Groq (required for STT)
+        # Groq (fallback for STT)
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         if not self.groq_api_key:
             raise ValueError("GROQ_API_KEY must be set for VoiceService")
         self.groq_client = Groq(api_key=self.groq_api_key)
 
-        # Sarvam (required for Hindi/Marathi)
+        # Sarvam (primary STT & optional TTS)
         self.sarvam_api_key = os.getenv("SARVAM_API_KEY")
         if not self.sarvam_api_key:
             logger.warning(
-                "⚠️ SARVAM_API_KEY not set — Hindi/Marathi STT/TTS will be unavailable"
+                "⚠️ SARVAM_API_KEY not set — using Groq Whisper as fallback for STT, and Edge TTS for TTS"
             )
 
     # ──────────────────────────────────────────────────────────────────
     #  STT — Speech to Text
     # ──────────────────────────────────────────────────────────────────
 
-    def transcribe(
-        self, audio_bytes: bytes, language: str = "en"
-    ) -> Optional[str]:
-        """
-        Transcribe audio bytes to text.
+    # Whisper verbose_json returns full names ("English", "Hindi") not
+    # ISO codes. Map the common ones we care about.
+    _WHISPER_NAME_TO_CODE = {
+        "english": "en",
+        "hindi": "hi",
+        "marathi": "mr",
+    }
 
-        Routes to Groq Whisper (English) or Sarvam Saaras (Hindi/Marathi).
+    @classmethod
+    def _normalize_language(cls, raw_lang: str) -> str:
+        """Convert a language name or code to a 2-letter ISO code."""
+        if not raw_lang:
+            return "en"
+        lowered = raw_lang.strip().lower()
+        if "hi" in lowered:
+            return "hi"
+        if "mr" in lowered:
+            return "mr"
+        if len(lowered) <= 3:
+            return lowered
+        return cls._WHISPER_NAME_TO_CODE.get(lowered, "en")
+
+    def transcribe(
+        self, audio_bytes: bytes, language: Optional[str] = None
+    ) -> Tuple[Optional[str], str]:
+        """
+        Transcribe audio bytes to text with language auto-detection.
+
+        Flow:
+        - If SARVAM_API_KEY is set: Uses Sarvam STT. If language is None,
+          auto-detects English, Hindi, and Marathi.
+        - Fallback: Uses Groq Whisper.
 
         Parameters:
         - audio_bytes (bytes): Raw audio data (WAV, MP3, etc.)
-        - language (str): Language code — "en", "hi", or "mr"
+        - language (str, optional): 2-letter ISO language code.
+          If None, triggers auto-detect.
 
         Returns:
-        - str: Transcribed text, or None on failure.
+        - Tuple of (transcribed_text, detected_language).
+          detected_language is a 2-letter ISO 639-1 code ("en", "hi", "mr").
+          Returns (None, "en") on failure.
         """
-        if language in SARVAM_LANGUAGES:
+        if self.sarvam_api_key:
             return self._transcribe_sarvam(audio_bytes, language)
-        return self._transcribe_groq(audio_bytes)
+        return self._transcribe_groq(audio_bytes, language=language)
 
-    def _transcribe_groq(self, audio_bytes: bytes) -> Optional[str]:
-        """Transcribe using Groq Whisper (English)."""
+    def _transcribe_groq(
+        self, audio_bytes: bytes, language: Optional[str] = None
+    ) -> Tuple[Optional[str], str]:
+        """
+        Transcribe using Groq Whisper with optional language auto-detection.
+
+        When language is None, Whisper auto-detects and we extract the
+        detected language from the verbose JSON response.
+        """
         try:
-            transcription = self.groq_client.audio.transcriptions.create(
-                file=("audio.wav", audio_bytes),
-                model="whisper-large-v3-turbo",
-                language="en",
-            )
-            return transcription.text
+            if language:
+                # Language is known — use standard transcription with ISO code
+                transcription = self.groq_client.audio.transcriptions.create(
+                    file=("audio.wav", audio_bytes),
+                    model="whisper-large-v3-turbo",
+                    language=language,
+                )
+                return (transcription.text, language)
+            else:
+                # Language unknown — auto-detect via verbose JSON
+                transcription = self.groq_client.audio.transcriptions.create(
+                    file=("audio.wav", audio_bytes),
+                    model="whisper-large-v3-turbo",
+                    response_format="verbose_json",
+                )
+                text = transcription.text
+                raw_lang = getattr(transcription, "language", "en") or "en"
+                detected_lang = self._normalize_language(raw_lang)
+                logger.info(
+                    f"🌐 Whisper auto-detected language: '{raw_lang}' → '{detected_lang}'"
+                )
+                return (text, detected_lang)
+
         except Exception as e:
             logger.error(f"Groq STT failed: {e}")
-            return None
+            return (None, language or "en")
 
     def _transcribe_sarvam(
-        self, audio_bytes: bytes, language: str
-    ) -> Optional[str]:
-        """Transcribe using Sarvam Saaras v3 (Hindi/Marathi)."""
+        self, audio_bytes: bytes, language: Optional[str] = None
+    ) -> Tuple[Optional[str], str]:
+        """Transcribe using Sarvam Saaras v3 with language auto-detection."""
         if not self.sarvam_api_key:
             logger.error("SARVAM_API_KEY not set — cannot transcribe")
-            return None
+            return (None, "en")
 
         try:
             t_start = time.time()
-            lang_code = SARVAM_LANGUAGE_CODES.get(language, "hi-IN")
+            # If language is None, use "unknown" to trigger auto-detect
+            lang_code = SARVAM_LANGUAGE_CODES.get(language, "unknown") if language else "unknown"
 
             response = requests.post(
                 f"{SARVAM_API_BASE}/speech-to-text",
@@ -127,15 +192,26 @@ class VoiceService:
             result = response.json()
 
             transcript = result.get("transcript", "")
+
+            # Extract detected language code if we used "unknown"
+            if lang_code == "unknown":
+                raw_detected = result.get("language_code", "en-IN") or "en-IN"
+                detected_lang = self._normalize_language(raw_detected)
+                logger.info(
+                    f"🌐 Sarvam auto-detected language: '{raw_detected}' → '{detected_lang}'"
+                )
+            else:
+                detected_lang = language or "en"
+
             t_elapsed = time.time() - t_start
             logger.info(
-                f"✅ Sarvam STT success | lang={language} | ⏱️ {t_elapsed:.2f}s"
+                f"✅ Sarvam STT success | lang={detected_lang} | ⏱️ {t_elapsed:.2f}s | Text: '{transcript[:100] if transcript else ''}'"
             )
-            return transcript if transcript else None
+            return (transcript if transcript else None, detected_lang)
 
         except Exception as e:
-            logger.error(f"Sarvam STT failed: {e}")
-            return None
+            logger.error(f"❌ Sarvam STT failed: {e}")
+            return (None, language or "en")
 
     # ──────────────────────────────────────────────────────────────────
     #  TTS — Text to Speech
@@ -150,7 +226,7 @@ class VoiceService:
         """
         Convert text to speech (synchronous).
 
-        Routes to Edge TTS (English) or Sarvam Bulbul (Hindi/Marathi).
+        Routes to Sarvam Bulbul (Hindi/Marathi, if API key set) or Edge TTS.
         Returns 8kHz, 16-bit, Mono raw PCM bytes for Exotel.
 
         Parameters:
@@ -161,16 +237,15 @@ class VoiceService:
         Returns:
         - bytes: RAW PCM bytes, or None on failure.
         """
-        if language in SARVAM_LANGUAGES:
+        if language in SARVAM_LANGUAGES and self.sarvam_api_key:
             return self._speak_sarvam(text, language, voice)
         # Edge TTS is async-native; run it in a new event loop for sync callers
         try:
             return asyncio.get_event_loop().run_until_complete(
-                self._speak_edge_tts(text, voice)
+                self._speak_edge_tts(text, language, voice)
             )
         except RuntimeError:
-            # If there's already a running loop, create a new one in a thread
-            return asyncio.run(self._speak_edge_tts(text, voice))
+            return asyncio.run(self._speak_edge_tts(text, language, voice))
 
     async def speak_async(
         self,
@@ -181,8 +256,8 @@ class VoiceService:
         """
         Async TTS for use in async contexts (e.g. audio_worker).
 
-        Routes to Edge TTS (English, natively async) or Sarvam Bulbul
-        (Hindi/Marathi, run in thread pool).
+        Routes to Sarvam Bulbul (Hindi/Marathi, if API key set) or
+        Edge TTS (all languages, natively async).
 
         Parameters:
         - text (str): Text to convert to speech.
@@ -192,16 +267,20 @@ class VoiceService:
         Returns:
         - bytes: RAW PCM bytes, or None on failure.
         """
-        if language in SARVAM_LANGUAGES:
+        if language in SARVAM_LANGUAGES and self.sarvam_api_key:
             return await asyncio.to_thread(self._speak_sarvam, text, language, voice)
-        return await self._speak_edge_tts(text, voice)
+        return await self._speak_edge_tts(text, language, voice)
 
     async def _speak_edge_tts(
-        self, text: str, voice: Optional[str] = None
+        self, text: str, language: str = "en", voice: Optional[str] = None
     ) -> Optional[bytes]:
-        """TTS using Microsoft Edge TTS (free, no API key, async-native)."""
+        """TTS using Microsoft Edge TTS (free, no API key, async-native).
+
+        Automatically selects the correct voice for the detected language.
+        """
         t_tts_start = time.time()
-        selected_voice = voice or EDGE_TTS_VOICE
+        # Pick voice: explicit override > language-mapped > default
+        selected_voice = voice or EDGE_TTS_VOICES.get(language, EDGE_TTS_DEFAULT_VOICE)
 
         try:
             communicate = edge_tts.Communicate(text, selected_voice)
@@ -215,12 +294,12 @@ class VoiceService:
             mp3_data = mp3_buffer.getvalue()
 
             if not mp3_data:
-                logger.warning("⚠️ Edge TTS returned no audio data")
+                logger.warning(f"⚠️ Edge TTS returned no audio data (voice={selected_voice})")
                 return None
 
             t_tts = time.time() - t_tts_start
             logger.info(
-                f"✅ Edge TTS success | voice={selected_voice} | "
+                f"✅ Edge TTS success | lang={language} | voice={selected_voice} | "
                 f"⏱️ {t_tts:.2f}s | {len(mp3_data)} bytes MP3"
             )
 

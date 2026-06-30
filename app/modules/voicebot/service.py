@@ -200,6 +200,7 @@ class ExotelCallManager:
         self.thread_id: Optional[str] = None
         self.audio_buffer: bytearray = bytearray()
         self.turn_count: int = 0
+        self.language: Optional[str] = None  # Auto-detected on first STT turn
 
     def handle_start(self, data: Dict[str, Any]) -> None:
         """

@@ -70,7 +70,7 @@ async def transcribe_audio(
             )
 
         provider = "sarvam" if language in SARVAM_LANGUAGES else "groq"
-        text = voice_service.transcribe(audio_bytes, language=language)
+        text, detected_lang = voice_service.transcribe(audio_bytes, language=language)
 
         if text is None:
             return TranscribeResponse(
@@ -84,7 +84,7 @@ async def transcribe_audio(
         return TranscribeResponse(
             success=True,
             text=text,
-            language=language,
+            language=detected_lang or language,
             provider=provider,
         )
 
