@@ -1,5 +1,9 @@
 # Windows Event Loop Fix: psycopg (async PostgreSQL driver) cannot run on
 # Windows' default ProactorEventLoop. Switch to SelectorEventLoop.
+# NOTE: asyncio.set_event_loop_policy() alone is NOT enough because uvicorn
+# 0.38's built-in asyncio loop factory explicitly returns ProactorEventLoop
+# on Windows, overriding the policy. We must ALSO provide a custom loop
+# factory via --loop app.main:selector_loop_factory (or use --loop none).
 import sys
 
 if sys.platform == "win32":
@@ -9,6 +13,15 @@ if sys.platform == "win32":
     # Fix Windows console encoding (cp1252 can't handle emoji in print statements)
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+
+# def selector_loop_factory(**kwargs):
+#     """Custom loop factory for uvicorn that always returns SelectorEventLoop on Windows.
+
+#     Usage:  python -m uvicorn app.main:app --loop app.main:selector_loop_factory
+#     Or simply use --loop none to let the WindowsSelectorEventLoopPolicy take effect.
+#     """
+#     return asyncio.SelectorEventLoop()
 
 # Python 3.13 Compatibility Shim: audioop was removed in 3.13.
 # We use audioop-lts as a drop-in replacement.

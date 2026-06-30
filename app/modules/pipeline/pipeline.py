@@ -38,8 +38,11 @@ from app.modules.vectorstore.service import VectorStoreService
 
 import logging
 
-# Configure logging for debugging
-logging.basicConfig(level=logging.DEBUG)
+# Configure logging — INFO for app, silence noisy HTTP internals
+logging.basicConfig(level=logging.INFO)
+# Suppress extremely verbose HTTP/hpack debug logs that drown real app output
+for _noisy in ("hpack", "httpcore", "httpx", "h2", "h11"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 

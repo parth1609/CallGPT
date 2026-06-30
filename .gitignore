@@ -211,4 +211,4 @@ __marimo__/
 .env
 
 # cache folder
-models_cache
+models_cache/

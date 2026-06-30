@@ -275,10 +275,14 @@ async def exotel_voicebot(ws: WebSocket):
                             logger.info(
                                 f"📤 Finished sending PCM chunks | Latency from start: {time.time() - t_start:.2f}s"
                             )
+                        else:
+                            logger.warning(
+                                f"⚠️ TTS returned no audio for: '{sentence[:50]}...' — skipping"
+                            )
 
                         sentence_queue.task_done()
                     except Exception as e:
-                        logger.error(f"Error in audio_worker: {e}")
+                        logger.error(f"Error in audio_worker: {e}", exc_info=True)
                         sentence_queue.task_done()
 
             # 4. Stream the pipeline
@@ -392,14 +396,17 @@ async def exotel_voicebot(ws: WebSocket):
             # ----------------------------------------------------------
             elif event == "start":
                 call.handle_start(data)
-                # Debug: log the stream_sid so we can verify it's correct
+                # Log the start event media format for audio debugging
+                start_payload = data.get("start", data)
+                media_format = start_payload.get("mediaFormat", start_payload.get("media_format", "NOT_PRESENT"))
                 logger.info(
                     f"📞 Call setup complete | "
                     f"stream_sid: '{call.stream_sid}' | "
                     f"Caller: {call.caller_number} | "
                     f"Called: {call.called_number} | "
                     f"Bucket: {call.bucket_name} | "
-                    f"Thread: {call.thread_id}"
+                    f"Thread: {call.thread_id} | "
+                    f"MediaFormat: {media_format}"
                 )
 
                 # If stream_sid is missing, try extracting from top-level data
