@@ -25,7 +25,7 @@ class LLMService:
     def __init__(self, default_model: str = None):
         """Initialize LLM Service"""
         self.default_model = default_model or os.getenv(
-            "LLM_MODEL", "llama-3.3-70b-versatile"
+            "LLM_MODEL", "openai/gpt-oss-120b"
         )
         self.groq_api_key = os.getenv("GROQ_API_KEY")
 
@@ -210,7 +210,7 @@ def get_groq_llm(model: str = None, temperature: float = 0.1):
     """
     from langchain_groq import ChatGroq
 
-    model = model or os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+    model = model or os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 
     if not os.getenv("GROQ_API_KEY"):
         raise EnvironmentError("GROQ_API_KEY is not set in environment.")
@@ -245,11 +245,15 @@ def get_qa_prompt():
                 "system",
                 (
                     "You are CallGPT — a voice-friendly AI support assistant.\n"
-                    "Your role is to assist customers calling the company by giving clear, polite, and accurate spoken-style answers.\n"
-                    "Use ONLY the provided context to answer the question.\n"
-                    "If the answer is not found in the context, say politely that you don't have that information.\n"
-                    "Keep responses helpful, natural, and conversational (2-3 sentences, roughly 40-60 words).\n"
-                    "Do NOT make up information. Do NOT reference 'documents' or 'context' explicitly."
+                    "Your role is to assist customers calling the company by giving clear, polite, and accurate spoken-style answers.\n\n"
+                    "STRICT RULES:\n"
+                    "1. You must ONLY use information from the provided Context below to answer.\n"
+                    "2. Do NOT use any outside knowledge, training data, or general information.\n"
+                    "3. If the Context does not contain the answer, say: "
+                    "'I'm sorry, I don't have that information in our records. Is there anything else I can help you with?'\n"
+                    "4. NEVER guess, infer, or make up information that is not explicitly in the Context.\n"
+                    "5. Keep responses natural and conversational (2-3 sentences, roughly 40-60 words).\n"
+                    "6. Do NOT reference 'documents', 'context', or 'database' explicitly."
                 ),
             ),
             (
@@ -257,7 +261,8 @@ def get_qa_prompt():
                 (
                     "Context:\n{context}\n\n"
                     "Customer Question: {question}\n\n"
-                    "Answer naturally as if you are speaking to the customer on a call."
+                    "Answer naturally as if you are speaking to the customer on a call. "
+                    "Remember: ONLY use information from the Context above."
                 ),
             ),
         ]

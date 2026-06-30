@@ -122,7 +122,7 @@ logger.info("✅ Embedding model pre-loaded and cached")
 # Greeting text — audio is generated lazily on first call via speak_async().
 # We can't pre-generate at import time because edge_tts async conflicts with
 # uvicorn's already-running event loop.
-GREETING_TEXT = "Hello, welcome. Please ask your question after the beep."
+GREETING_TEXT = "Hello, please say English for English, हिंदी for Hindi, or मराठी for Marathi."
 _cached_greeting_pcm_b64: str | None = None
 logger.info("ℹ️ Greeting will be generated on first call (lazy async TTS)")
 
@@ -239,10 +239,6 @@ async def exotel_voicebot(ws: WebSocket):
                 executor, voice_service.transcribe, wav_bytes, call.language
             )
             transcribed_text, detected_lang = result
-            # Persist detected language for this call's subsequent turns + TTS
-            if detected_lang and not call.language:
-                call.language = detected_lang
-                logger.info(f"🌐 Language set for call: '{call.language}'")
             t_stt = time.time() - t_start
             logger.info(
                 f"⏱️ STT duration: {t_stt:.2f}s | Lang: {detected_lang} | Text: '{transcribed_text[:100] if transcribed_text else ''}'"
@@ -251,6 +247,35 @@ async def exotel_voicebot(ws: WebSocket):
             if not transcribed_text or not transcribed_text.strip():
                 call.reset_buffer()
                 return
+
+            # Detect language selection on the first turn
+            is_language_selection = False
+            if not call.language:
+                explicit_lang = None
+                clean = transcribed_text.strip().lower().replace(".", "").replace("?", "").replace("!", "")
+                words = clean.split()
+                if len(words) <= 3:
+                    if any(w in clean for w in ("marathi", "मराठी", "marati", "marath")):
+                        explicit_lang = "mr-IN"
+                    elif any(w in clean for w in ("hindi", "हिंदी", "hind")):
+                        explicit_lang = "hi-IN"
+                    elif any(w in clean for w in ("english", "इंग्रजी", "ingli", "eng")):
+                        explicit_lang = "mr-en"
+
+                if explicit_lang:
+                    call.language = explicit_lang
+                    is_language_selection = True
+                    logger.info(f"🌐 Language explicitly selected: '{call.language}'")
+                else:
+                    # Map the 2-letter detected language code to custom codes
+                    mapped_detected = "mr-en"
+                    if detected_lang == "hi":
+                        mapped_detected = "hi-IN"
+                    elif detected_lang == "mr":
+                        mapped_detected = "mr-IN"
+                    
+                    call.language = mapped_detected
+                    logger.info(f"🌐 Language auto-detected: '{call.language}'")
 
             # 3. Setup Streaming Pipeline & Audio Worker
             t_rag_start = time.time()
@@ -271,7 +296,7 @@ async def exotel_voicebot(ws: WebSocket):
                         logger.info(f"🔊 Synthesizing ({call.language}): '{sentence[:50]}...'")
                         # Use async TTS with detected language
                         pcm_data = await voice_service.speak_async(
-                            sentence, language=call.language or "en"
+                            sentence, language=call.language or "mr-en"
                         )
 
                         if pcm_data:
@@ -296,26 +321,38 @@ async def exotel_voicebot(ws: WebSocket):
             worker_task = asyncio.create_task(audio_worker())
 
             try:
-                state = {
-                    "question": transcribed_text,
-                    "bucket_name": call.bucket_name,
-                    "thread_id": call.thread_id,
-                    "messages": [],
-                    **VOICE_PIPELINE_DEFAULTS,
-                }
-                config = {"configurable": {"thread_id": call.thread_id}}
+                if is_language_selection:
+                    # Skip RAG pipeline; just confirm the selected language
+                    if call.language == "hi-IN":
+                        confirmation = "ठीक है, मैं आपसे हिंदी में बात करूँगा। मैं आपकी क्या मदद कर सकता हूँ?"
+                    elif call.language == "mr-IN":
+                        confirmation = "ठीक आहे, मी तुमच्याशी मराठीत बोलेन. मी तुम्हाला काय मदत करू?"
+                    else:
+                        confirmation = "Okay, I will talk to you in English. How can I help you?"
+                    
+                    await sentence_queue.put(confirmation)
+                    full_answer.append(confirmation)
+                else:
+                    state = {
+                        "question": transcribed_text,
+                        "bucket_name": call.bucket_name,
+                        "thread_id": call.thread_id,
+                        "messages": [],
+                        **VOICE_PIPELINE_DEFAULTS,
+                    }
+                    config = {"configurable": {"thread_id": call.thread_id}}
 
-                buffer = ""
-                async for chunk in _voicebot_pipeline.astream(
-                    state, config, stream_mode="messages"
-                ):
-                    # Only process AI response chunks — skip HumanMessage/SystemMessage
-                    if isinstance(chunk, tuple) and len(chunk) > 1:
-                        msg = chunk[0]
-                        # Filter: only AIMessageChunk has the AI's streaming response
-                        msg_type = type(msg).__name__
-                        if "AIMessage" not in msg_type:
-                            continue
+                    buffer = ""
+                    async for chunk in _voicebot_pipeline.astream(
+                        state, config, stream_mode="messages"
+                    ):
+                        # Only process AI response chunks — skip HumanMessage/SystemMessage
+                        if isinstance(chunk, tuple) and len(chunk) > 1:
+                            msg = chunk[0]
+                            # Filter: only AIMessageChunk has the AI's streaming response
+                            msg_type = type(msg).__name__
+                            if "AIMessage" not in msg_type:
+                                continue
                         if hasattr(msg, "content") and msg.content:
                             content = msg.content
                             buffer += content

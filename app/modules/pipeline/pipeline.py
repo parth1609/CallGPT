@@ -161,10 +161,10 @@ class RAGState(TypedDict, total=False):
 
     # Document
     filename: str
-    content: Optional[str] = None
+    content: Optional[str]
     uploaded_file_path: Optional[str]  # Path to uploaded file for processing
     # input_path: str
-    metadata: str = None
+    metadata: Optional[Dict[str, Any]]
 
     # Supabase
     bucket_name: str  # same for pinecone-index name
@@ -317,9 +317,9 @@ def node_vectorstore(state: RAGState) -> Dict[str, Any]:
         print(f"DEBUG: Ensuring index '{idx}' exists with dimension={dimension}")
         try:
             vstore._ensure_index(idx, dimension)
-            print(f"✅ Index '{idx}' ready for upsert")
+            print(f"[OK] Index '{idx}' ready for upsert")
         except Exception as e:
-            print(f"⚠️ Warning: Could not ensure index: {str(e)}")
+            print(f"[Warning] Could not ensure index: {str(e)}")
             # Continue anyway - might exist but check failed
 
     vstore.upsert_vectors(
@@ -425,8 +425,8 @@ async def node_answer(state: RAGState):
             query_embedding=query_embedding,
         )
         t_search = time.time() - t_search_start
-        logger.debug(
-            f"STEP 6a OUTPUT: Found {len(search_results)} results | ⏱️ {t_search:.2f}s"
+        logger.info(
+            f"📦 Retrieved {len(search_results)} chunks from Pinecone index '{index_name}' | ⏱️ {t_search:.2f}s"
         )
     elif search_type == "mmr_search":
         logger.debug(
@@ -479,9 +479,31 @@ async def node_answer(state: RAGState):
             seen_content.add(d.page_content)
 
     context = "\n\n".join(unique_docs)
-    logger.debug(
-        f"STEP 8 OUTPUT: Context length={len(context)} characters (deduplicated)"
+    logger.info(
+        f"📄 Context: {len(unique_docs)} unique chunks, {len(context)} chars | "
+        f"Preview: {context[:200]}..." if len(context) > 200 else
+        f"📄 Context: {len(unique_docs)} unique chunks, {len(context)} chars | Full: {context}"
     )
+
+    # Guard: if no relevant content was retrieved, return a canned refusal
+    # instead of letting the LLM hallucinate from its training data.
+    if not context or not context.strip():
+        logger.warning(
+            f"⚠️ No content retrieved from Pinecone index '{index_name}' for query: {query[:100]}"
+        )
+        no_info_msg = (
+            "I'm sorry, I don't have that information in our records. "
+            "Is there anything else I can help you with?"
+        )
+        yield {"messages": [AIMessageChunk(content=no_info_msg)]}
+        yield {
+            "answer": no_info_msg,
+            "messages": [
+                HumanMessage(content=state["question"]),
+                AIMessage(content=no_info_msg),
+            ],
+        }
+        return
 
     # Create the full message list
     logger.debug("STEP 9: Building message history")

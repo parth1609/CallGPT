@@ -77,7 +77,7 @@ class DocumentService:
             self.client.storage.create_bucket(
                 self.bucket_name, options={"public": True}
             )
-            print(f"✅ Automatically created storage bucket '{self.bucket_name}' in Supabase Storage.")
+            print(f"[OK] Automatically created storage bucket '{self.bucket_name}' in Supabase Storage.")
         except Exception as e:
             error_str = str(e)
             # If bucket already exists, we can safely ignore the error
@@ -101,7 +101,7 @@ class DocumentService:
                                 (self.bucket_name, self.bucket_name)
                             )
                             conn.commit()
-                    print(f"✅ Successfully created/ensured bucket '{self.bucket_name}' directly via PostgreSQL fallback!")
+                    print(f"[OK] Successfully created/ensured bucket '{self.bucket_name}' directly via PostgreSQL fallback!")
                     return
                 except Exception as db_err:
                     print(f"PostgreSQL bucket creation fallback warning: {db_err}")
@@ -111,7 +111,7 @@ class DocumentService:
 
             logger = logging.getLogger(__name__)
             logger.warning(
-                f"⚠️ Failed to automatically create storage bucket '{self.bucket_name}' due to restricted permissions (403/RLS). "
+                f"[Warning] Failed to automatically create storage bucket '{self.bucket_name}' due to restricted permissions (403/RLS). "
                 "Please ensure SUPABASE_SERVICE_KEY is set in your .env to allow automatic bucket creation."
             )
 
@@ -176,7 +176,7 @@ class DocumentService:
                             (file_uuid, self.bucket_name, path, len(content_bytes), "text/plain", public_url, datetime.utcnow().isoformat())
                         )
                         conn.commit()
-                print(f"✅ Successfully stored file metadata for '{path}' directly via PostgreSQL!")
+                print(f"[OK] Successfully stored file metadata for '{path}' directly via PostgreSQL!")
             else:
                 # Fallback to Supabase client if DATABASE_URL is not present
                 metadata_record = {

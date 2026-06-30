@@ -89,12 +89,26 @@ class VoiceService:
         "marathi": "mr",
     }
 
+    # Normalize specific codes to 2-letter ISO codes
+    _CODE_TO_ISO = {
+        "mr-in": "mr",
+        "hi-in": "hi",
+        "mr-en": "en",
+        "en-in": "en",
+        "en-us": "en",
+        "en": "en",
+        "hi": "hi",
+        "mr": "mr",
+    }
+
     @classmethod
     def _normalize_language(cls, raw_lang: str) -> str:
         """Convert a language name or code to a 2-letter ISO code."""
         if not raw_lang:
             return "en"
         lowered = raw_lang.strip().lower()
+        if lowered in cls._CODE_TO_ISO:
+            return cls._CODE_TO_ISO[lowered]
         if "hi" in lowered:
             return "hi"
         if "mr" in lowered:
