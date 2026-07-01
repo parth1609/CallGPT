@@ -193,6 +193,11 @@ class DocumentService:
 
         # Automatically register company in companies table if not present
         try:
+            # Extract user_email from metadata if provided
+            user_email = None
+            if metadata and isinstance(metadata, dict):
+                user_email = metadata.get("user_email")
+
             # Try via PostgreSQL DATABASE_URL to bypass all RLS restrictions
             import os
             db_url = os.getenv("DATABASE_URL")
@@ -204,18 +209,36 @@ class DocumentService:
                 
                 with psycopg.connect(db_url) as conn:
                     with conn.cursor() as cur:
+                        # Ensure email column exists (safe migration)
+                        cur.execute("""
+                            DO $$ BEGIN
+                                ALTER TABLE companies ADD COLUMN IF NOT EXISTS email TEXT;
+                            EXCEPTION WHEN others THEN NULL;
+                            END $$;
+                        """)
+                        conn.commit()
+
                         # Check if already exists
-                        cur.execute("SELECT id FROM companies WHERE bucket_name = %s;", (self.bucket_name,))
-                        if not cur.fetchone():
+                        cur.execute("SELECT id, email FROM companies WHERE bucket_name = %s;", (self.bucket_name,))
+                        existing = cur.fetchone()
+                        if not existing:
                             cur.execute(
                                 """
-                                INSERT INTO companies (company_name, bucket_name, exotel_number)
-                                VALUES (%s, %s, %s);
+                                INSERT INTO companies (company_name, bucket_name, exotel_number, email)
+                                VALUES (%s, %s, %s, %s);
                                 """,
-                                (self.bucket_name.capitalize(), self.bucket_name, dummy_number)
+                                (self.bucket_name.capitalize(), self.bucket_name, dummy_number, user_email)
                             )
                             conn.commit()
                             print(f"✅ Successfully registered company for bucket '{self.bucket_name}' directly via PostgreSQL!")
+                        elif user_email and (existing[1] is None or existing[1] == ""):
+                            # Update email if company exists but has no email yet
+                            cur.execute(
+                                "UPDATE companies SET email = %s WHERE bucket_name = %s;",
+                                (user_email, self.bucket_name)
+                            )
+                            conn.commit()
+                            print(f"✅ Updated email for company bucket '{self.bucket_name}'")
             else:
                 # Fallback to Supabase client if DATABASE_URL is not present
                 company_check = self.client.table("companies").select("id").eq("bucket_name", self.bucket_name).execute()
@@ -224,8 +247,10 @@ class DocumentService:
                     company_record = {
                         "company_name": self.bucket_name.capitalize(),
                         "bucket_name": self.bucket_name,
-                        "exotel_number": "08000000000" # fallback placeholder
+                        "exotel_number": "08000000000", # fallback placeholder
                     }
+                    if user_email:
+                        company_record["email"] = user_email
                     self.client.table("companies").insert(company_record).execute()
                     print(f"✅ Automatically registered company for bucket '{self.bucket_name}' in companies table.")
         except Exception as e:

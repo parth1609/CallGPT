@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_KEY: Optional[str] = None
     SUPABASE_API_KEY: Optional[str] = None  # Optional, for pgvector operations
-    SUPABASE_BUCKET: str
+    SUPABASE_BUCKET: str = "openai-bucket"
 
     # Pinecone
     PINECONE_API_KEY: Optional[str] = None

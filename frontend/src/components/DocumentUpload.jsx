@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
+import { useUser } from '@clerk/clerk-react';
 import './DocumentUpload.css';
 
 const DocumentUpload = () => {
+  const { user, isLoaded: isUserLoaded } = useUser();
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [error, setError] = useState(null);
   const [apiStatus, setApiStatus] = useState('checking');
+  const [bucketLoading, setBucketLoading] = useState(true);
 
   // Configuration state
   const [config, setConfig] = useState({
-    bucketName: 'openai-bucket',
+    bucketName: '',
     chunkSize: 1000,
     chunkOverlap: 200,
     embeddingsModel: 'sentence-transformers/all-MiniLM-L6-v2',
@@ -23,6 +26,40 @@ const DocumentUpload = () => {
   React.useEffect(() => {
     checkApiHealth();
   }, []);
+
+  // Fetch user's bucket from backend when Clerk user is loaded
+  React.useEffect(() => {
+    if (isUserLoaded && user) {
+      fetchUserBucket();
+    } else if (isUserLoaded && !user) {
+      setBucketLoading(false);
+    }
+  }, [isUserLoaded, user]);
+
+  const fetchUserBucket = async () => {
+    try {
+      const email = user.primaryEmailAddress?.emailAddress;
+      if (!email) {
+        setBucketLoading(false);
+        return;
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/v1/pipeline/company/by-email?email=${encodeURIComponent(email)}`
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.bucket_name) {
+          setConfig(prev => ({ ...prev, bucketName: data.bucket_name }));
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch user bucket:', err);
+    } finally {
+      setBucketLoading(false);
+    }
+  };
 
   const checkApiHealth = async () => {
     try {
@@ -69,13 +106,17 @@ const DocumentUpload = () => {
       const formData = new FormData();
       formData.append('file', selectedFile);
 
-      // Build query parameters
+      // Build query parameters — include user_email for company linking
+      const userEmail = user?.primaryEmailAddress?.emailAddress;
       const params = new URLSearchParams({
         bucket_name: config.bucketName,
         embeddings_model: config.embeddingsModel,
         chunk_size: config.chunkSize.toString(),
         chunk_overlap: config.chunkOverlap.toString()
       });
+      if (userEmail) {
+        params.append('user_email', userEmail);
+      }
 
       const response = await fetch(
         `${API_BASE_URL}/api/v1/pipeline/organisations/upload-file?${params}`,
@@ -138,12 +179,14 @@ const DocumentUpload = () => {
           <h3>⚙️ Org Configuration</h3>
           
           <div className="config-group">
-            <label htmlFor="bucketName">Bucket/Index Name</label>
+            <label htmlFor="bucketName">Bucket/Index Name {bucketLoading && <span style={{fontSize: '0.8em', color: '#888'}}>⏳ Loading...</span>}</label>
             <input
               id="bucketName"
               type="text"
               value={config.bucketName}
               onChange={(e) => setConfig({...config, bucketName: e.target.value})}
+              placeholder={bucketLoading ? 'Detecting your account bucket...' : 'Enter bucket/index name'}
+              disabled={bucketLoading}
             />
           </div>
 

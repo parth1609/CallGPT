@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
             "question": "warmup",
             "thread_id": "warmup",
             "messages": [],
-            "bucket_name": "openai-bucket",
+            "bucket_name": settings.SUPABASE_BUCKET,
         }
         async for _ in _voicebot_pipeline.astream(
             dummy_state,

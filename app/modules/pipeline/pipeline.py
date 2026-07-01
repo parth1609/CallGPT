@@ -224,10 +224,16 @@ def document_service_node(state: RAGState) -> Dict[str, Any]:
     original_filename = state.get("filename")
 
     # Upload to Supabase (handles bucket creation internally if needed)
+    # Merge state-level metadata (e.g. user_email) with file metadata
+    combined_metadata = dict(file.metadata) if file.metadata else {}
+    state_metadata = state.get("metadata")
+    if state_metadata and isinstance(state_metadata, dict):
+        combined_metadata.update(state_metadata)
+
     upload_result = doc_service.upload_document(
         filename=original_filename,
         content=file.page_content,
-        metadata=file.metadata,
+        metadata=combined_metadata,
     )
 
     return {
