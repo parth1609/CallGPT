@@ -1,6 +1,8 @@
 # c:\Users\parth\OneDrive\Desktop\one\CallGPT\Makefile
 PYTHON = python   # use the Windows interpreter name
 
+.PHONY: install api frontend format lint
+
 # install dependencies
 install:
 	uv add -r requirements.txt
@@ -11,9 +13,9 @@ api:
 	uv run uvicorn app.main:app --reload
 
  
-# run Streamlit app
+# run frontend
 frontend:
-	$(PYTHON) -m streamlit run streamlit_app.py
+	npm --prefix frontend run dev
 
 # format code
 format:

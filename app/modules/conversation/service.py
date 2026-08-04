@@ -15,7 +15,6 @@ from uuid import uuid4
 from psycopg_pool import AsyncConnectionPool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import dict_row
-from pgvector.psycopg import register_vector_async
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
 
@@ -36,7 +35,13 @@ class ConversationService:
         self.database_url = database_url or os.getenv("DATABASE_URL")
 
         if not self.database_url:
-            raise ValueError("DATABASE_URL must be provided")
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "⚠️ DATABASE_URL not provided. ConversationService will not be functional."
+            )
+            return  # Don't try to create pool if we don't have URL
 
         self.pool = AsyncConnectionPool(
             conninfo=self.database_url,
@@ -52,34 +57,36 @@ class ConversationService:
     async def open(self):
         """Open the connection pool."""
         await self.pool.open()
-        
+
         # checkpointer for retrive the threads from the langgraph inbuild feature
         self.checkpointer = AsyncPostgresSaver(self.pool)
         await self.checkpointer.setup()
 
-    
     @staticmethod
-    def _extract_messages_from_checkpointer(checkpointer_instance, thread_id: str) -> List[Dict[str, Any]]:
+    def _extract_messages_from_checkpointer(
+        checkpointer_instance, thread_id: str
+    ) -> List[Dict[str, Any]]:
         """
         Helper function to extract messages from a checkpointer instance.
-        
+
         Parameters:
         - checkpointer_instance: The PostgresSaver instance
         - thread_id: The thread ID to retrieve
-        
+
         Returns:
         - List of message dictionaries (without duplicates)
         """
         import logging
+
         logger = logging.getLogger(__name__)
-        
+
         # Define the configuration for the specific thread
         config = {"configurable": {"thread_id": thread_id}}
-        
+
         # Retrieve the full history of checkpoints for that thread
         thread_history = list(checkpointer_instance.list(config))
         logger.debug(f"Found {len(thread_history)} checkpoints for thread {thread_id}")
-        
+
         # IMPORTANT: Each checkpoint contains the FULL conversation state up to that point
         # So we only need to get messages from the MOST RECENT checkpoint
         # Otherwise we get duplicates!
@@ -87,11 +94,13 @@ class ConversationService:
         if thread_history:
             # Get the most recent checkpoint (first in the list since they're in reverse chronological order)
             latest_checkpoint = thread_history[0]
-            checkpoint_messages = latest_checkpoint.checkpoint.get("channel_values", {}).get("messages", [])
+            checkpoint_messages = latest_checkpoint.checkpoint.get(
+                "channel_values", {}
+            ).get("messages", [])
             messages = checkpoint_messages
-        
+
         logger.debug(f"Extracted {len(messages)} total messages from latest checkpoint")
-        
+
         # Convert messages to dictionary format for easier processing
         result = []
         for msg in messages:
@@ -100,44 +109,56 @@ class ConversationService:
             elif isinstance(msg, AIMessage):
                 result.append({"type": "AI", "content": msg.content})
             else:
-                result.append({"type": msg.__class__.__name__, "content": str(msg.content)})
-        
+                result.append(
+                    {"type": msg.__class__.__name__, "content": str(msg.content)}
+                )
+
         return result
 
     @staticmethod
-    def get_thread_history(thread_id: str, checkpointer_instance=None, db_uri: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_thread_history(
+        thread_id: str, checkpointer_instance=None, db_uri: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
         Static method to retrieve conversation history for a specific thread.
-        
+
         This is the main entry point for getting thread history. It can use either a provided
         checkpointer instance or create a new one from a database URI.
-        
+
         Parameters:
         - thread_id: The thread ID to retrieve history for
         - checkpointer_instance: Optional PostgresSaver instance to use
         - db_uri: Optional database URI if checkpointer_instance is None
-        
+
         Returns:
         - List of message dictionaries with 'type' and 'content' keys
         """
         import logging
+
         logger = logging.getLogger(__name__)
-        
+
         logger.debug(f"Retrieving thread history for thread_id: {thread_id}")
-        
+
         # Use provided checkpointer if available
         if checkpointer_instance is not None:
-            return ConversationService._extract_messages_from_checkpointer(checkpointer_instance, thread_id)
-        
+            return ConversationService._extract_messages_from_checkpointer(
+                checkpointer_instance, thread_id
+            )
+
         # Otherwise create a temporary checkpointer
         from langgraph.checkpoint.postgres import PostgresSaver
+
         database_url = db_uri or os.getenv("DATABASE_URL")
         if not database_url:
-            raise ValueError("DATABASE_URL must be provided or set as environment variable")
-        
+            raise ValueError(
+                "DATABASE_URL must be provided or set as environment variable"
+            )
+
         # Create a temporary checkpointer - use contexit t manager to avoid prepared statement issues
         with PostgresSaver.from_conn_string(database_url) as temp_checkpointer:
-            return ConversationService._extract_messages_from_checkpointer(temp_checkpointer, thread_id)
+            return ConversationService._extract_messages_from_checkpointer(
+                temp_checkpointer, thread_id
+            )
 
     async def close(self):
         """Close the connection pool."""
@@ -267,8 +288,6 @@ class ConversationService:
 
             messages = await asyncio.gather(*task)
             return [msg for msg in messages]
-
-
 
 
 # if __name__ == "__main__":

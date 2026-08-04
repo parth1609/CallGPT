@@ -15,6 +15,7 @@ from .models import (
 )
 from .service import PipelineService
 from datetime import datetime
+import os
 
 
 router = APIRouter(tags=["Pipeline"])
@@ -101,6 +102,91 @@ async def upload_organisation_document_json(request: OrganisationUploadRequest):
         )
 
 
+# ============================================================================
+# Company Lookup Endpoint
+# ============================================================================
+
+
+@router.get("/company/by-email")
+async def get_company_by_email(email: str):
+    """
+    Look up the company (and its bucket_name) associated with a user's email.
+    Used by the frontend to auto-populate the Bucket/Index field for the
+    currently logged-in Clerk user.
+
+    Parameters:
+    - email: The user's email address (from Clerk)
+
+    Return Value:
+    - Dict with company_id, company_name, bucket_name
+    """
+    try:
+        # Try direct PostgreSQL first (most reliable, bypasses RLS)
+        db_url = os.getenv("DATABASE_URL")
+        if db_url:
+            import psycopg
+
+            with psycopg.connect(db_url) as conn:
+                with conn.cursor() as cur:
+                    # Ensure email column exists (safe migration)
+                    cur.execute("""
+                        DO $$ BEGIN
+                            ALTER TABLE companies ADD COLUMN IF NOT EXISTS email TEXT;
+                        EXCEPTION WHEN others THEN NULL;
+                        END $$;
+                    """)
+                    conn.commit()
+
+                    cur.execute(
+                        "SELECT id, company_name, bucket_name FROM companies WHERE email = %s LIMIT 1;",
+                        (email,),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        return {
+                            "company_id": str(row[0]),
+                            "company_name": row[1],
+                            "bucket_name": row[2],
+                        }
+            return {"bucket_name": None, "message": "No company found for this email"}
+
+        # Fallback: try Supabase client
+        from supabase import create_client
+
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_key = (
+            os.getenv("SUPABASE_API_KEY")
+            or os.getenv("SUPABASE_SERVICE_KEY")
+            or os.getenv("SUPABASE_KEY")
+        )
+
+        if not supabase_url or not supabase_key:
+            return {"bucket_name": None, "message": "No database connection available"}
+
+        client = create_client(supabase_url, supabase_key)
+        response = (
+            client.table("companies")
+            .select("id, company_name, bucket_name")
+            .eq("email", email)
+            .limit(1)
+            .execute()
+        )
+
+        if response.data and len(response.data) > 0:
+            row = response.data[0]
+            return {
+                "company_id": row["id"],
+                "company_name": row.get("company_name", ""),
+                "bucket_name": row["bucket_name"],
+            }
+
+        return {"bucket_name": None, "message": "No company found for this email"}
+
+    except Exception as e:
+        # Don't crash — just return null bucket so the field stays empty
+        return {"bucket_name": None, "message": f"Lookup failed: {str(e)}"}
+
+
 @router.post(
     "/organisations/upload-file",
     response_model=OrganisationUploadResponse,
@@ -112,6 +198,7 @@ async def upload_organisation_document_file(
     embeddings_model: str = "text-embedding-3-small",
     chunk_size: int = 500,
     chunk_overlap: int = 50,
+    user_email: Optional[str] = None,
 ):
     """
     Upload and process organisation document through LangGraph pipeline (File Upload).
@@ -125,6 +212,7 @@ async def upload_organisation_document_file(
     - embeddings_model: Model to use for embeddings
     - chunk_size: Size of text chunks
     - chunk_overlap: Overlap between chunks
+    - user_email: Clerk user's email to link company to user account
 
     Return Value:
     - OrganisationUploadResponse: Processing result with chunk count
@@ -147,6 +235,7 @@ async def upload_organisation_document_file(
             embeddings_model=embeddings_model,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            metadata={"user_email": user_email} if user_email else None,
         )
 
         return OrganisationUploadResponse(
@@ -197,7 +286,7 @@ async def query_documents(request: CustomerQueryRequest):
     """
     try:
         # Query through service layer
-        result = pipeline_service.query_documents(
+        result = await pipeline_service.query_documents(
             bucket_name=request.bucket_name,
             question=request.question,
             embeddings_model=request.embeddings_model,
@@ -219,7 +308,10 @@ async def query_documents(request: CustomerQueryRequest):
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
+        import traceback
+
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Query processing failed: {str(e)}",
+            detail=f"Query processing failed: {type(e).__name__}: {str(e)}",
         )

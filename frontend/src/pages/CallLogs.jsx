@@ -27,18 +27,18 @@ const CallLogs = () => {
 
     // Dummy data for call logs
     const callLogsData = [
-        { id: 1, callerNumber: '+1 (555) 123-4567', date: 'Jan 4, 2026 - 9:32 AM', duration: '2:45', callType: 'Inbound', status: 'Automated' },
-        { id: 2, callerNumber: '+1 (555) 987-6543', date: 'Jan 4, 2026 - 9:28 AM', duration: '5:12', callType: 'Inbound', status: 'Transferred' },
-        { id: 3, callerNumber: '+1 (555) 456-7890', date: 'Jan 4, 2026 - 9:15 AM', duration: '1:38', callType: 'Outbound', status: 'Completed' },
-        { id: 4, callerNumber: '+1 (555) 321-0987', date: 'Jan 4, 2026 - 9:02 AM', duration: '3:21', callType: 'Inbound', status: 'Automated' },
-        { id: 5, callerNumber: '+1 (555) 654-3210', date: 'Jan 4, 2026 - 8:55 AM', duration: '4:05', callType: 'Inbound', status: 'Transferred' },
-        { id: 6, callerNumber: '+1 (555) 789-0123', date: 'Jan 4, 2026 - 8:42 AM', duration: '2:18', callType: 'Outbound', status: 'Completed' },
-        { id: 7, callerNumber: '+1 (555) 234-5678', date: 'Jan 4, 2026 - 8:30 AM', duration: '6:45', callType: 'Inbound', status: 'Missed' },
-        { id: 8, callerNumber: '+1 (555) 876-5432', date: 'Jan 4, 2026 - 8:15 AM', duration: '1:52', callType: 'Inbound', status: 'Automated' },
-        { id: 9, callerNumber: '+1 (555) 345-6789', date: 'Jan 3, 2026 - 5:45 PM', duration: '3:33', callType: 'Outbound', status: 'Completed' },
-        { id: 10, callerNumber: '+1 (555) 567-8901', date: 'Jan 3, 2026 - 4:20 PM', duration: '0:45', callType: 'Inbound', status: 'Missed' },
-        { id: 11, callerNumber: '+1 (555) 890-1234', date: 'Jan 3, 2026 - 3:10 PM', duration: '4:28', callType: 'Inbound', status: 'Transferred' },
-        { id: 12, callerNumber: '+1 (555) 012-3456', date: 'Jan 3, 2026 - 2:55 PM', duration: '2:15', callType: 'Inbound', status: 'Automated' },
+        { id: 1, callerNumber: '+1 (555) 123-4567', date: 'Jan 4, 2026 - 9:32 AM', duration: '2:45', status: 'Automated' },
+        { id: 2, callerNumber: '+1 (555) 987-6543', date: 'Jan 4, 2026 - 9:28 AM', duration: '5:12', status: 'Transferred' },
+        { id: 3, callerNumber: '+1 (555) 456-7890', date: 'Jan 4, 2026 - 9:15 AM', duration: '1:38', status: 'Completed' },
+        { id: 4, callerNumber: '+1 (555) 321-0987', date: 'Jan 4, 2026 - 9:02 AM', duration: '3:21', status: 'Automated' },
+        { id: 5, callerNumber: '+1 (555) 654-3210', date: 'Jan 4, 2026 - 8:55 AM', duration: '4:05', status: 'Transferred' },
+        { id: 6, callerNumber: '+1 (555) 789-0123', date: 'Jan 4, 2026 - 8:42 AM', duration: '2:18', status: 'Completed' },
+        { id: 7, callerNumber: '+1 (555) 234-5678', date: 'Jan 4, 2026 - 8:30 AM', duration: '6:45', status: 'Missed' },
+        { id: 8, callerNumber: '+1 (555) 876-5432', date: 'Jan 4, 2026 - 8:15 AM', duration: '1:52', status: 'Automated' },
+        { id: 9, callerNumber: '+1 (555) 345-6789', date: 'Jan 3, 2026 - 5:45 PM', duration: '3:33', status: 'Completed' },
+        { id: 10, callerNumber: '+1 (555) 567-8901', date: 'Jan 3, 2026 - 4:20 PM', duration: '0:45', status: 'Missed' },
+        { id: 11, callerNumber: '+1 (555) 890-1234', date: 'Jan 3, 2026 - 3:10 PM', duration: '4:28', status: 'Transferred' },
+        { id: 12, callerNumber: '+1 (555) 012-3456', date: 'Jan 3, 2026 - 2:55 PM', duration: '2:15', status: 'Automated' },
     ];
 
     // Filter and search logic
@@ -134,7 +134,6 @@ const CallLogs = () => {
                                 <th>Caller Number</th>
                                 <th>Date</th>
                                 <th>Duration</th>
-                                <th>Call Type</th>
                                 <th>Status</th>
                             </tr>
                         </thead>
@@ -148,11 +147,6 @@ const CallLogs = () => {
                                         </td>
                                         <td className="date-cell">{call.date}</td>
                                         <td className="duration-cell">{call.duration}</td>
-                                        <td>
-                                            <span className={`type-badge ${call.callType.toLowerCase()}`}>
-                                                {call.callType}
-                                            </span>
-                                        </td>
                                         <td>
                                             <span className={`status-badge ${call.status.toLowerCase()}`}>
                                                 {call.status}

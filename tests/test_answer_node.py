@@ -10,20 +10,28 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 sys.modules["pinecone"] = MagicMock()
 sys.modules["supabase"] = MagicMock()
 
-from app.pipeline import node_answer, RAGState
+from app.modules.pipeline.pipeline import node_answer, RAGState
 from langchain_core.documents import Document
 
 
-class TestAnswerNode(unittest.TestCase):
-    @patch("app.pipeline.RetrievalService")  # Mock RetrievalService in pipeline
-    @patch("app.pipeline.LLMService")  # Mock LLMService in pipeline
-    @patch("app.pipeline.get_groq_llm")
-    @patch("app.pipeline.get_qa_prompt")
-    def test_node_answer(
-        self, mock_get_prompt, mock_get_llm, MockLLMService, MockRetrievalService
+class TestAnswerNode(unittest.IsolatedAsyncioTestCase):
+    @patch(
+        "app.modules.pipeline.pipeline.get_retrieval_service"
+    )  # Mock get_retrieval_service in pipeline
+    @patch(
+        "app.modules.pipeline.pipeline.get_llm_service"
+    )  # Mock get_llm_service in pipeline
+    @patch("app.modules.pipeline.pipeline.get_groq_llm")
+    @patch("app.modules.pipeline.pipeline.get_qa_prompt")
+    async def test_node_answer(
+        self,
+        mock_get_prompt,
+        mock_get_llm,
+        mock_get_llm_service,
+        mock_get_retrieval_service,
     ):
         # Setup RetrievalService mock
-        mock_retriever_service = MockRetrievalService.return_value
+        mock_retriever_service = mock_get_retrieval_service.return_value
 
         # Mock _get_query_embedding method
         mock_retriever_service._get_query_embedding.return_value = [0.1, 0.2, 0.3]
@@ -32,14 +40,11 @@ class TestAnswerNode(unittest.TestCase):
         mock_retriever = MagicMock()
         mock_retriever_service.similarity_search.return_value = mock_retriever
 
-        # Mock retrieve method to return documents
-        mock_doc1 = Document(
-            page_content="Answer is in context 1", metadata={"source": "test1"}
-        )
-        mock_doc2 = Document(
-            page_content="Answer is in context 2", metadata={"source": "test2"}
-        )
-        mock_retriever_service.retrieve.return_value = [mock_doc1, mock_doc2]
+        # Mock retrieve method is no longer needed since similarity_search returns results directly
+        mock_retriever_service.similarity_search.return_value = [
+            {"content": "Answer is in context 1", "metadata": {"source": "test1"}},
+            {"content": "Answer is in context 2", "metadata": {"source": "test2"}},
+        ]
 
         # Mock prompt
         mock_prompt = mock_get_prompt.return_value
@@ -47,12 +52,13 @@ class TestAnswerNode(unittest.TestCase):
 
         # Mock LLM streaming response
         mock_llm = mock_get_llm.return_value
-        chunk1 = MagicMock()
-        chunk1.content = "Hello"
-        chunk2 = MagicMock()
-        chunk2.content = " World"
 
-        mock_llm.stream.return_value = iter([chunk1, chunk2])
+        async def mock_stream_chat_async(*args, **kwargs):
+            yield {"content": "Hello", "finish_reason": None}
+            yield {"content": " World", "finish_reason": "stop"}
+
+        mock_llm_service = mock_get_llm_service.return_value
+        mock_llm_service.stream_chat_async = mock_stream_chat_async
 
         # Setup state
         state = RAGState(
@@ -67,23 +73,20 @@ class TestAnswerNode(unittest.TestCase):
         )
 
         # Execute
-        gen = node_answer(state)
-        results = list(gen)
+        results = [chunk async for chunk in node_answer(state)]
 
         # Verify mocks were called
-        MockRetrievalService.assert_called_once_with(index_name="test-index")
+        mock_get_retrieval_service.assert_called_once_with(index_name="test-index")
         mock_retriever_service._get_query_embedding.assert_called_once_with(
-            "What is the answer?"
+            "What is the answer?", model_name="sentence-transformers/all-MiniLM-L6-v2"
         )
         mock_retriever_service.similarity_search.assert_called_once_with(
             query="What is the answer?",
             k=4,
             embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+            use_reranker=False,
+            query_embedding=[0.1, 0.2, 0.3],
         )
-        mock_retriever_service.retrieve.assert_called_once_with(
-            mock_retriever, "What is the answer?"
-        )
-        mock_get_llm.assert_called_once()
 
         # Check results
         self.assertTrue(len(results) > 0, "Should have at least one result")

@@ -5,6 +5,14 @@ Supports two-stage retrieval with Pinecone reranking.
 """
 
 import os
+
+# Critical: Enforce HuggingFace offline mode at the absolute top of the module.
+# This prevents network update checks in background executor threads.
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = "./models_cache"
+
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from pinecone import Pinecone
@@ -172,6 +180,7 @@ class RetrievalService:
         use_reranker: bool = False,
         fetch_k: int = 20,
         reranker_model: str = "bge-reranker-v2-m3",
+        query_embedding: Optional[List[float]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Perform similarity search using Pinecone with LangChain.
@@ -211,8 +220,9 @@ class RetrievalService:
             )
 
         # Standard similarity search (existing implementation)
-        # Get query embedding from embedding service
-        query_embedding = self._get_query_embedding(query, embedding_model)
+        # Get query embedding from embedding service if not provided
+        if query_embedding is None:
+            query_embedding = self._get_query_embedding(query, embedding_model)
 
         # Perform similarity search using Pinecone
         # Use query_by_vector for direct embedding search
@@ -254,6 +264,7 @@ class RetrievalService:
         lambda_mult: float = 0.5,
         threshold: float = 0.5,
         embedding_model: Optional[str] = None,
+        query_embedding: Optional[List[float]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Perform Maximum Marginal Relevance (MMR) search using Pinecone.
@@ -271,8 +282,9 @@ class RetrievalService:
         Returns:
         - List of diverse, relevant results
         """
-        # Get query embedding
-        query_embedding = self._get_query_embedding(query, embedding_model)
+        # Get query embedding if not provided
+        if query_embedding is None:
+            query_embedding = self._get_query_embedding(text_query, embedding_model)
 
         # Fetch more candidates than needed for MMR
         try:
@@ -357,3 +369,36 @@ class RetrievalService:
         if magnitude1 == 0 or magnitude2 == 0:
             return 0.0
         return dot_product / (magnitude1 * magnitude2)
+
+
+# ============================================================================
+# Pipeline Utilities (Backend-compatible functions for LangGraph integration)
+# ============================================================================
+
+# Module-level singleton cache for RetrievalService.
+# Ensures the Pinecone connection and Embedding service are re-used across all calls.
+_RETRIEVER_CACHE: dict = {}
+
+
+def get_retrieval_service(index_name: str = None) -> RetrievalService:
+    """
+    Purpose: Return a cached RetrievalService instance for the specified index.
+
+    Avoids the 2-3 second Pinecone initialization and Embedding model load
+    on every single turn in the RAG pipeline.
+
+    Parameters:
+    - index_name (str): The name of the Pinecone index.
+
+    Return Value:
+    - RetrievalService: A cached service instance.
+    """
+    global _RETRIEVER_CACHE
+
+    if index_name is None:
+        index_name = os.getenv("SUPABASE_BUCKET", "openai-bucket")
+
+    if index_name not in _RETRIEVER_CACHE:
+        _RETRIEVER_CACHE[index_name] = RetrievalService(index_name=index_name)
+
+    return _RETRIEVER_CACHE[index_name]

@@ -458,3 +458,18 @@ class VectorStoreService:
             self.supabase_client.table(self.table_name).insert(batch).execute()
 
         return self.table_name
+
+
+def build_supabase_from_documents(
+    docs: List[Document],
+    embeddings: Any,
+    table_name: str = "documents",
+    query_name: str = "match_documents",
+) -> str:
+    """
+    Utility function to build a Supabase vector store from documents.
+    """
+    service = VectorStoreService(embeddings=embeddings)
+    service.table_name = table_name
+    service.query_name = query_name
+    return service.upsert_documents(docs)

@@ -1,5 +1,14 @@
-from __future__ import annotations
 import os
+import time
+import logging
+import asyncio
+
+# Force HuggingFace offline mode BEFORE any transformers/sentence-transformers imports.
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = "./models_cache"
+
 from fileinput import filename
 from typing import Any, Dict, List, Optional, TypedDict
 from typing import Annotated, Sequence
@@ -12,26 +21,61 @@ from torch.nn import Embedding
 
 # Import utility functions from modules (backend pattern)
 from app.modules.embedding.service import get_embedding_model, EmbeddingService
-from app.modules.llm.service import get_groq_llm, get_qa_prompt, LLMService
+from app.modules.llm.service import (
+    get_groq_llm,
+    get_qa_prompt,
+    get_llm_service,
+    LLMService,
+)
 from app.modules.document.service import (
     chunk_documents,
     load_text_file,
     DocumentService,
 )
-from app.modules.retrieval.service import RetrievalService
+from app.modules.retrieval.service import get_retrieval_service, RetrievalService
 from app.modules.conversation.service import ConversationService
 from app.modules.vectorstore.service import VectorStoreService
 
 import logging
 
-# Configure logging for debugging
-logging.basicConfig(level=logging.DEBUG)
+# Configure logging — INFO for app, silence noisy HTTP internals
+logging.basicConfig(level=logging.INFO)
+# Suppress extremely verbose HTTP/hpack debug logs that drown real app output
+for _noisy in ("hpack", "httpcore", "httpx", "h2", "h11"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
 from dotenv import load_dotenv
 import uuid
 from langgraph.checkpoint.postgres import PostgresSaver
+
+
+class AsyncWrapperPostgresSaver(PostgresSaver):
+    async def aget_tuple(self, config):
+        return await asyncio.to_thread(self.get_tuple, config)
+
+    async def aput(self, config, checkpoint, metadata, new_versions):
+        return await asyncio.to_thread(
+            self.put, config, checkpoint, metadata, new_versions
+        )
+
+    async def alist(self, config, *, filter=None, before=None, limit=None):
+        def _get_list():
+            return list(self.list(config, filter=filter, before=before, limit=limit))
+
+        items = await asyncio.to_thread(_get_list)
+        for item in items:
+            yield item
+
+    async def aput_writes(self, config, writes, task_id, task_path=""):
+        return await asyncio.to_thread(
+            self.put_writes, config, writes, task_id, task_path
+        )
+
+    async def adelete_thread(self, thread_id):
+        return await asyncio.to_thread(self.delete_thread, thread_id)
+
 
 load_dotenv()
 
@@ -45,7 +89,7 @@ if DB_URI:
         # We need to create a connection pool with prepare_threshold=None to disable prepared statements
         # This is necessary when using PostgresSaver to avoid conflicts
         from psycopg_pool import ConnectionPool
-        
+
         # Create connection pool with prepare_threshold=None to disable prepared statements
         pool = ConnectionPool(
             conninfo=DB_URI,
@@ -54,13 +98,15 @@ if DB_URI:
                 "autocommit": True,
                 "prepare_threshold": None,  # Disable prepared statements to avoid conflicts
             },
-            open=True
+            open=True,
         )
-        
+
         # Create PostgresSaver with the connection pool
-        checkpointer = PostgresSaver(pool)
+        checkpointer = AsyncWrapperPostgresSaver(pool)
         checkpointer.setup()  # Initialize the required database tables
-        logger.info("✅ PostgreSQL checkpointer initialized successfully (prepared statements disabled)")
+        logger.info(
+            "✅ PostgreSQL checkpointer initialized successfully (prepared statements disabled)"
+        )
     except Exception as e:
         logger.warning(f"⚠️ Failed to initialize PostgreSQL checkpointer: {e}")
         logger.warning("Conversations will not be persisted to database")
@@ -75,33 +121,36 @@ _THREAD_RETRIEVERS = {}
 _THREAD_METADATA = {}
 
 
-def get_thread_history(thread_id: str, db_uri: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_thread_history(
+    thread_id: str, db_uri: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """
     Retrieve the full conversation history for a specific thread from PostgreSQL checkpointer.
-    
+
     This is a convenience wrapper around ConversationService.get_thread_history that uses
     the global checkpointer instance.
-    
+
     Parameters:
     - thread_id: The specific thread ID to retrieve history for
     - db_uri: PostgreSQL connection string (defaults to DATABASE_URL env variable)
-    
+
     Returns:
     - List of message dictionaries with 'type' and 'content' keys
-    
+
     Example:
         messages = get_thread_history("your_thread_id")
         for msg in messages:
             print(f"{msg['type']}: {msg['content']}")
     """
     from app.modules.conversation.service import ConversationService
-    
+
     # Use global checkpointer if available and no custom db_uri provided
     if checkpointer is not None and db_uri is None:
-        return ConversationService.get_thread_history(thread_id, checkpointer_instance=checkpointer)
+        return ConversationService.get_thread_history(
+            thread_id, checkpointer_instance=checkpointer
+        )
     else:
         return ConversationService.get_thread_history(thread_id, db_uri=db_uri)
-
 
 
 class RAGState(TypedDict, total=False):
@@ -112,10 +161,10 @@ class RAGState(TypedDict, total=False):
 
     # Document
     filename: str
-    content: Optional[str] = None
+    content: Optional[str]
     uploaded_file_path: Optional[str]  # Path to uploaded file for processing
     # input_path: str
-    metadata: str = None
+    metadata: Optional[Dict[str, Any]]
 
     # Supabase
     bucket_name: str  # same for pinecone-index name
@@ -149,7 +198,6 @@ class RAGState(TypedDict, total=False):
     answer: str
 
 
-
 #  LangGraph Nodes
 
 
@@ -176,10 +224,16 @@ def document_service_node(state: RAGState) -> Dict[str, Any]:
     original_filename = state.get("filename")
 
     # Upload to Supabase (handles bucket creation internally if needed)
+    # Merge state-level metadata (e.g. user_email) with file metadata
+    combined_metadata = dict(file.metadata) if file.metadata else {}
+    state_metadata = state.get("metadata")
+    if state_metadata and isinstance(state_metadata, dict):
+        combined_metadata.update(state_metadata)
+
     upload_result = doc_service.upload_document(
         filename=original_filename,
         content=file.page_content,
-        metadata=file.metadata,
+        metadata=combined_metadata,
     )
 
     return {
@@ -206,9 +260,11 @@ def embedding_node(state: RAGState):
     # Unpack the tuple returned by chunk_and_embed
     # Returns: (chunks, embeddings, model_name, total_chunks)
     try:
-        chunks_text = Embedding_Service.chunk_text(text=state.get("content"))
-        all_embeddings, _, dimension = Embedding_Service.generate_embeddings(
-            texts=chunks_text, model_name=embedding_model
+        chunks_text, all_embeddings, _, dimension = Embedding_Service.chunk_and_embed(
+            text=content,
+            chunk_size=state.get("chunk_size", 1000),
+            chunk_overlap=state.get("chunk_overlap", 200),
+            model_name=embedding_model,
         )
     except Exception as e:
         raise ValueError(f"Failed to chunk and embed content: {str(e)}")
@@ -267,9 +323,9 @@ def node_vectorstore(state: RAGState) -> Dict[str, Any]:
         print(f"DEBUG: Ensuring index '{idx}' exists with dimension={dimension}")
         try:
             vstore._ensure_index(idx, dimension)
-            print(f"✅ Index '{idx}' ready for upsert")
+            print(f"[OK] Index '{idx}' ready for upsert")
         except Exception as e:
-            print(f"⚠️ Warning: Could not ensure index: {str(e)}")
+            print(f"[Warning] Could not ensure index: {str(e)}")
             # Continue anyway - might exist but check failed
 
     vstore.upsert_vectors(
@@ -281,7 +337,7 @@ def node_vectorstore(state: RAGState) -> Dict[str, Any]:
     return {}
 
 
-def node_answer(state: RAGState):
+async def node_answer(state: RAGState):
     """Retrieve documents and generate answer with streaming from pinecone vector store"""
     logger.debug("=" * 80)
     logger.debug("NODE: answer - Starting")
@@ -311,33 +367,41 @@ def node_answer(state: RAGState):
 
     logger.debug(f"STEP 0a: Index dimension={dimension} for model={embeddings_model}")
 
-    try:
-        # Create temporary VectorStoreService instance to ensure index
-        vector_service = VectorStoreService()
-        vector_service._ensure_index(index_name, dimension)
-        logger.debug(f"STEP 0 OUTPUT: Index '{index_name}' ready")
-    except Exception as e:
-        logger.warning(f"STEP 0 WARNING: Could not ensure index: {str(e)}")
-        # Continue anyway - index might exist but check failed
+    # Retrieval service (Module-level singleton to avoid 2-3s setup)
+    retriever_service = get_retrieval_service(index_name=index_name)
 
-    # Retrieval service
-    logger.debug(f"STEP 1: Initializing RetrievalService with index_name={index_name}")
-    retriever_service = RetrievalService(index_name=index_name)
-
-    # LLM Service
-    logger.debug("STEP 2: Initializing LLMService")
-    llm_service = LLMService()
+    # LLM Service (Module-level singleton)
+    llm_service = get_llm_service()
 
     query = state.get("question")
     logger.debug(f"STEP 3: Query extracted: {query[:100] if query else None}...")
 
-    # Get query embedding
-    logger.debug("STEP 4: Getting query embedding")
-    query_embedding = retriever_service._get_query_embedding(
-        query, model_name=state.get("embeddings_model")
-    )
+    # Define tasks for parallel execution
+    def _ensure_idx():
+        try:
+            vector_service = VectorStoreService()
+            vector_service._ensure_index(index_name, dimension)
+            logger.debug(f"STEP 0 OUTPUT: Index '{index_name}' ready")
+        except Exception as e:
+            logger.warning(f"STEP 0 WARNING: Could not ensure index: {str(e)}")
+
+    def _get_embedding():
+        return retriever_service._get_query_embedding(
+            query, model_name=state.get("embeddings_model")
+        )
+
+    # Parallel execution of index check and query embedding
+    logger.debug("STEP 4: Getting query embedding and ensuring index in parallel")
+    t_parallel_start = time.time()
+
+    ensure_task = asyncio.create_task(asyncio.to_thread(_ensure_idx))
+    embed_task = asyncio.create_task(asyncio.to_thread(_get_embedding))
+
+    _, query_embedding = await asyncio.gather(ensure_task, embed_task)
+
+    t_embed = time.time() - t_parallel_start
     logger.debug(
-        f"STEP 4 OUTPUT: Query embedding dimension={len(query_embedding) if query_embedding else 0}"
+        f"STEP 4 OUTPUT: Query embedding dimension={len(query_embedding) if query_embedding else 0} | ⏱️ {t_embed:.2f}s"
     )
 
     # Get QA prompt template
@@ -345,44 +409,58 @@ def node_answer(state: RAGState):
     prompt = get_qa_prompt()
 
     # Perform search based on search_type
-    search_type = state.get("search_type", "similarity_search")
-    use_reranker = state.get("use_reranker", False)
-    logger.debug(f"STEP 6: Performing {search_type}, use_reranker={use_reranker}")
+    # Force search_type=similarity_search and use_reranker=False for sub-3s voicebot speed
+    search_type = "similarity_search"
+    use_reranker = False
+
+    # Use k=4 for a more detailed context while still remaining fast
+    k = 4
+
+    logger.debug(
+        f"STEP 6: Performing {search_type}, use_reranker={use_reranker}, k={k}"
+    )
 
     if search_type == "similarity_search":
-        logger.debug(f"STEP 6a: similarity_search with k={state.get('k', 4)}")
-        search_results = retriever_service.similarity_search(
+        t_search_start = time.time()
+        search_results = await asyncio.to_thread(
+            retriever_service.similarity_search,
             query=query,
-            k=state.get("k", 4),
+            k=k,
             embedding_model=state.get("embeddings_model"),
             use_reranker=use_reranker,
-            fetch_k=state.get("fetch_k", 20),
-            reranker_model=state.get("reranker_model", "bge-reranker-v2-m3"),
+            query_embedding=query_embedding,
         )
-        logger.debug(f"STEP 6a OUTPUT: Found {len(search_results)} results")
+        t_search = time.time() - t_search_start
+        logger.info(
+            f"📦 Retrieved {len(search_results)} chunks from Pinecone index '{index_name}' | ⏱️ {t_search:.2f}s"
+        )
     elif search_type == "mmr_search":
         logger.debug(
             f"STEP 6b: mmr_search with k={state.get('k', 4)}, fetch_k={state.get('fetch_k', 20)}"
         )
-        search_results = retriever_service.mmr_search(
+        search_results = await asyncio.to_thread(
+            retriever_service.mmr_search,
             text_query=query,
             k=state.get("k", 4),
             fetch_k=state.get("fetch_k", 20),
             lambda_mult=state.get("lambda_mult", 0.5),
             embedding_model=state.get("embeddings_model"),
+            query_embedding=query_embedding,
         )
         logger.debug(f"STEP 6b OUTPUT: Found {len(search_results)} results")
     else:
         logger.warning(
             f"Unknown search_type: {search_type}, defaulting to similarity_search"
         )
-        search_results = retriever_service.similarity_search(
+        search_results = await asyncio.to_thread(
+            retriever_service.similarity_search,
             query=query,
             k=state.get("k", 4),
             embedding_model=state.get("embeddings_model"),
             use_reranker=use_reranker,
             fetch_k=state.get("fetch_k", 20),
             reranker_model=state.get("reranker_model", "bge-reranker-v2-m3"),
+            query_embedding=query_embedding,
         )
 
     # Convert search results to Document objects
@@ -397,10 +475,41 @@ def node_answer(state: RAGState):
     ]
     logger.debug(f"STEP 7 OUTPUT: Created {len(docs)} Document objects")
 
-    # Prepare context from documents
+    # Prepare context from documents (with deduplication)
     logger.debug("STEP 8: Preparing context from retrieved documents")
-    context = "\n\n".join(d.page_content for d in docs)
-    logger.debug(f"STEP 8 OUTPUT: Context length={len(context)} characters")
+    seen_content = set()
+    unique_docs = []
+    for d in docs:
+        if d.page_content not in seen_content:
+            unique_docs.append(d.page_content)
+            seen_content.add(d.page_content)
+
+    context = "\n\n".join(unique_docs)
+    logger.info(
+        f"📄 Context: {len(unique_docs)} unique chunks, {len(context)} chars | "
+        f"Preview: {context[:200]}..." if len(context) > 200 else
+        f"📄 Context: {len(unique_docs)} unique chunks, {len(context)} chars | Full: {context}"
+    )
+
+    # Guard: if no relevant content was retrieved, return a canned refusal
+    # instead of letting the LLM hallucinate from its training data.
+    if not context or not context.strip():
+        logger.warning(
+            f"⚠️ No content retrieved from Pinecone index '{index_name}' for query: {query[:100]}"
+        )
+        no_info_msg = (
+            "I'm sorry, I don't have that information in our records. "
+            "Is there anything else I can help you with?"
+        )
+        yield {"messages": [AIMessageChunk(content=no_info_msg)]}
+        yield {
+            "answer": no_info_msg,
+            "messages": [
+                HumanMessage(content=state["question"]),
+                AIMessage(content=no_info_msg),
+            ],
+        }
+        return
 
     # Create the full message list
     logger.debug("STEP 9: Building message history")
@@ -430,15 +539,21 @@ def node_answer(state: RAGState):
 
     # Stream tokens and yield AI message chunks for smoother UI
     logger.debug(
-        f"STEP 11: Starting LLM streaming with model={state.get('llm_model', 'openai/gpt-oss-120b')}"
+        f"STEP 11: Starting LLM streaming with model={state.get('llm_model', 'llama-3.3-70b-versatile')}"
     )
+    t_llm_start = time.time()
+    t_first_token = None
     answer_accum = ""
     chunk_count = 0
-    for chunk in llm_service.stream_chat(
+    async for chunk in llm_service.stream_chat_async(
         messages=messages_dict,
-        model=state.get("llm_model", "openai/gpt-oss-120b"),
+        model=state.get("llm_model", "llama-3.3-70b-versatile"),
         temperature=state.get("temperature", 0.5),
     ):
+        if t_first_token is None:
+            t_first_token = time.time() - t_llm_start
+            logger.debug(f"⏱️ Time to first token: {t_first_token:.2f}s")
+
         delta = chunk.get("content", "")
         if not delta:
             continue
@@ -447,8 +562,9 @@ def node_answer(state: RAGState):
         # Emit incremental assistant chunks via the messages channel
         yield {"messages": [AIMessageChunk(content=delta)]}
 
+    t_llm_total = time.time() - t_llm_start
     logger.debug(
-        f"STEP 11 OUTPUT: Streamed {chunk_count} chunks, total answer length={len(answer_accum)}"
+        f"STEP 11 OUTPUT: Streamed {chunk_count} chunks, total answer length={len(answer_accum)} | ⏱️ Total LLM duration: {t_llm_total:.2f}s"
     )
 
     # Finalize: return full answer and persist the turn into memory
@@ -464,7 +580,6 @@ def node_answer(state: RAGState):
     logger.debug("NODE: answer - Complete")
     logger.debug("=" * 80)
     yield final_output
-
 
 
 # Organisaton graph

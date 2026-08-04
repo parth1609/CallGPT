@@ -10,11 +10,11 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 sys.modules["pinecone"] = MagicMock()
 sys.modules["supabase"] = MagicMock()
 
-from app.pipeline import embedding_node, RAGState
+from app.modules.pipeline.pipeline import embedding_node, RAGState
 
 
 class TestEmbeddingNode(unittest.TestCase):
-    @patch("app.pipeline.EmbeddingService")
+    @patch("app.modules.pipeline.pipeline.EmbeddingService")
     def test_embedding_node(self, mock_service_cls):
         # Setup mocks
         mock_service_instance = mock_service_cls.return_value
@@ -43,7 +43,10 @@ class TestEmbeddingNode(unittest.TestCase):
 
             # Verify
             mock_service_instance.chunk_and_embed.assert_called_with(
-                "test content", 100, 10, "test-model"
+                text="test content",
+                chunk_size=100,
+                chunk_overlap=10,
+                model_name="test-model",
             )
 
             self.assertEqual(result["embeddings"], mock_embeddings)

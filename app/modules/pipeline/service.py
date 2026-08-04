@@ -153,7 +153,7 @@ class PipelineService:
 
         return result
 
-    def query_documents(
+    async def query_documents(
         self,
         bucket_name: str,
         question: str,
@@ -214,11 +214,12 @@ class PipelineService:
         }
 
         # Execute workflow and get final result
-        result = self.customer_pipeline.invoke(state)
+        config = {"configurable": {"thread_id": thread_id or "default"}}
+        result = await self.customer_pipeline.ainvoke(state, config=config)
 
         return result
 
-    def stream_query(
+    async def stream_query(
         self,
         bucket_name: str,
         question: str,
@@ -269,5 +270,6 @@ class PipelineService:
         }
 
         # Stream results from pipeline
-        for chunk in self.customer_pipeline.stream(state):
+        config = {"configurable": {"thread_id": thread_id or "default"}}
+        async for chunk in self.customer_pipeline.astream(state, config=config):
             yield chunk

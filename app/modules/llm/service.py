@@ -4,8 +4,8 @@ Handles chat completion with various LLM providers.
 """
 
 import os
-from typing import List, Dict, Any, Iterator
-from groq import Groq
+from typing import List, Dict, Any, Iterator, AsyncIterator
+from groq import Groq, AsyncGroq
 from dotenv import load_dotenv
 
 
@@ -33,6 +33,7 @@ class LLMService:
             raise ValueError("GROQ_API_KEY must be set")
 
         self.groq_client = Groq(api_key=self.groq_api_key)
+        self.async_groq_client = AsyncGroq(api_key=self.groq_api_key)
 
     def chat(
         self,
@@ -125,6 +126,49 @@ class LLMService:
                     "finish_reason": finish_reason,
                 }
 
+    async def stream_chat_async(
+        self,
+        messages: List[Dict[str, str]],
+        model: str = None,
+        temperature: float = 0.5,
+        max_tokens: int = None,
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """
+        Stream chat completion asynchronously.
+
+        Parameters:
+        - messages: List of message dicts
+        - model: Model name
+        - temperature: Sampling temperature
+        - max_tokens: Maximum tokens
+
+        Yields:
+        - Dicts with content chunks and finish_reason
+        """
+        model = model or self.default_model
+
+        groq_messages = [
+            {"role": msg["role"], "content": msg["content"]} for msg in messages
+        ]
+
+        stream = await self.async_groq_client.chat.completions.create(
+            model=model,
+            messages=groq_messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+
+        async for chunk in stream:
+            delta = chunk.choices[0].delta
+            finish_reason = chunk.choices[0].finish_reason
+
+            if delta.content:
+                yield {
+                    "content": delta.content,
+                    "finish_reason": finish_reason,
+                }
+
     def get_available_models(self) -> List[Dict[str, Any]]:
         """Get list of available models"""
         return [
@@ -142,7 +186,7 @@ class LLMService:
 # ============================================================================
 
 
-def get_groq_llm(model: str = "llama-3.1-8b-instant", temperature: float = 0.1):
+def get_groq_llm(model: str = None, temperature: float = 0.1):
     """
     Purpose: Initialize a Groq chat LLM via langchain_groq for pipeline usage.
 
@@ -165,6 +209,8 @@ def get_groq_llm(model: str = "llama-3.1-8b-instant", temperature: float = 0.1):
     True
     """
     from langchain_groq import ChatGroq
+
+    model = model or os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 
     if not os.getenv("GROQ_API_KEY"):
         raise EnvironmentError("GROQ_API_KEY is not set in environment.")
@@ -199,11 +245,15 @@ def get_qa_prompt():
                 "system",
                 (
                     "You are CallGPT — a voice-friendly AI support assistant.\n"
-                    "Your role is to assist customers calling the company by giving clear, polite, and accurate spoken-style answers.\n"
-                    "Use ONLY the provided context to answer the question.\n"
-                    "If the answer is not found in the context, say politely that you don't have that information.\n"
-                    "Keep responses short, natural, and conversational (like talking on a call).\n"
-                    "Do NOT make up information. Do NOT reference 'documents' or 'context' explicitly."
+                    "Your role is to assist customers calling the company by giving clear, polite, and accurate spoken-style answers.\n\n"
+                    "STRICT RULES:\n"
+                    "1. You must ONLY use information from the provided Context below to answer.\n"
+                    "2. Do NOT use any outside knowledge, training data, or general information.\n"
+                    "3. If the Context does not contain the answer, say: "
+                    "'I'm sorry, I don't have that information in our records. Is there anything else I can help you with?'\n"
+                    "4. NEVER guess, infer, or make up information that is not explicitly in the Context.\n"
+                    "5. Keep responses natural and conversational (2-3 sentences, roughly 40-60 words).\n"
+                    "6. Do NOT reference 'documents', 'context', or 'database' explicitly."
                 ),
             ),
             (
@@ -211,8 +261,41 @@ def get_qa_prompt():
                 (
                     "Context:\n{context}\n\n"
                     "Customer Question: {question}\n\n"
-                    "Answer naturally as if you are speaking to the customer on a call."
+                    "Answer naturally as if you are speaking to the customer on a call. "
+                    "Remember: ONLY use information from the Context above."
                 ),
             ),
         ]
     )
+
+
+# ============================================================================
+# Pipeline Utilities (Backend-compatible functions for LangGraph integration)
+# ============================================================================
+
+# Module-level singleton cache for LLMService.
+# Ensures the Groq client and its configuration are re-used across all calls.
+_LLM_SERVICE_CACHE: dict = {}
+
+
+def get_llm_service(default_model: str = None) -> LLMService:
+    """
+    Purpose: Return a cached LLMService instance.
+
+    Avoids the overhead of re-initializing the Groq client and fetching
+    environment variables on every single turn in the RAG pipeline.
+
+    Parameters:
+    - default_model (str): Optional override for the default model.
+
+    Return Value:
+    - LLMService: A cached service instance.
+    """
+    global _LLM_SERVICE_CACHE
+
+    # Use a fixed key for the singleton since it handles internal model switching
+    cache_key = "default"
+    if cache_key not in _LLM_SERVICE_CACHE:
+        _LLM_SERVICE_CACHE[cache_key] = LLMService(default_model=default_model)
+
+    return _LLM_SERVICE_CACHE[cache_key]
